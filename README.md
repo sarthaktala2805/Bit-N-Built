@@ -313,7 +313,7 @@ Firebase UID.
 Cloud Firestore is the persistent cloud data layer for StageX AI.
 
 Data Architecture
-
+```text
 users/{userId}
 └── events/{eventId}
     ├── speakers/{speakerId}
@@ -325,7 +325,7 @@ users/{userId}
     ├── aiConversations/{conversationId}
     ├── scripts/{scriptId}
     └── invitations/{invitationId}
-
+```
 User Isolation
 
 Firestore security rules restrict data access using the authenticated
@@ -384,7 +384,7 @@ GitHub
 Vercel
 
 📁 Project Structure
-
+```text
 Bit-N-Built/
 ├── app/
 │   ├── agenda/
@@ -446,7 +446,7 @@ Bit-N-Built/
 ├── STAGEX_AI_PRD.md
 ├── README.md
 └── package.json
-
+```
 🔑 Environment Configuration
 
 Create .env.local in the project root for local development.
