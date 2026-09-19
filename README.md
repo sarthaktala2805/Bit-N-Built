@@ -3,7 +3,9 @@ Plan. Perform. Adapt.
 Powered by NeuroX
 Bit N Build '26 --- PS-5: Smart Anchor & Stage Flow Management
 System
-[StageX AI Logo](/public/brand/stagex-logo.png)
+<p align="center">
+  <img src="public/brand/stagex-logo.png" alt="StageX AI" width="500">
+</p>
 ---
 🎯 Executive Overview
 StageX AI is an intelligent live stage operations platform for event
