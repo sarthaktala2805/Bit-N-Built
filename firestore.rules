@@ -1,0 +1,63 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny all access to any document outside the defined user schema
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // User Isolation Boundary:
+    // Only an authenticated user whose UID matches {userId} can read, create, update, or delete
+    // documents under their personal path: /users/{userId}/...
+    // User A can NEVER access User B's documents.
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+
+      // Event documents owned by this user
+      match /events/{eventId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+
+        // Subcollections scoped under each event
+        match /speakers/{speakerId} {
+          allow read, write: if request.auth != null && request.auth.uid == userId;
+        }
+
+        match /sessions/{sessionId} {
+          allow read, write: if request.auth != null && request.auth.uid == userId;
+        }
+
+        match /delays/{delayId} {
+          allow read, write: if request.auth != null && request.auth.uid == userId;
+        }
+
+        match /emergencies/{emergencyId} {
+          allow read, write: if request.auth != null && request.auth.uid == userId;
+        }
+
+        match /aiRecords/{recordId} {
+          allow read, write: if request.auth != null && request.auth.uid == userId;
+        }
+
+        match /activityLogs/{logId} {
+          allow read, write: if request.auth != null && request.auth.uid == userId;
+        }
+
+        match /scripts/{scriptId} {
+          allow read, write: if request.auth != null && request.auth.uid == userId;
+        }
+
+        match /invitations/{invitationId} {
+          allow read, write: if request.auth != null && request.auth.uid == userId;
+        }
+      }
+
+      // AI Conversations collection owned by this user
+      match /aiConversations/{conversationId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+    }
+  }
+}
+
