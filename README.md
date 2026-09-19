@@ -2,8 +2,9 @@
   <img src="./public/brand/stagex-logo.png" alt="StageX AI" width="220">
 </p>
 
-<p align="center"><strong>StageX AI</strong> · Plan. Perform. Adapt.</p>
-<p align="center">Powered by NeuroX · Bit N Build '26 · PS-5</p>
+<p align="center"><strong>StageX AI</strong> 
+<p align="center">Plan. Perform. Adapt.</p>
+<p align="center">Powered by NeuroX </p>
 
 🎯 Executive Overview
 
