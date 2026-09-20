@@ -8,7 +8,7 @@ import { useEventStore } from "@/store/event-store";
 import { useAuth } from "@/contexts/auth-context";
 import { AlertCircle, X } from "lucide-react";
 
-const PUBLIC_ROUTES = ["/login"];
+const PUBLIC_ROUTES = ["/login", "/audience"];
 
 export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { hydrate, hydrated, corruptionNotice, clearCorruptionNotice } = useEventStore();
@@ -16,14 +16,15 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
   const pathname = usePathname();
   const router = useRouter();
 
-  const isPublicRoute = PUBLIC_ROUTES.includes(pathname);
+  const isPublicRoute = PUBLIC_ROUTES.some((route) => pathname === route || pathname?.startsWith("/audience"));
 
   // Hydrate event store once authenticated with user-scoped persistence
   useEffect(() => {
     if (user) {
       hydrate(user.uid);
     } else {
-      useEventStore.getState().clearState();
+      // For audience guest access or unauthenticated users, also allow local hydration so event access codes resolve
+      hydrate(null);
     }
   }, [hydrate, user]);
 
@@ -32,10 +33,10 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
     if (authLoading) return;
     if (!user && !isPublicRoute) {
       router.replace("/login");
-    } else if (user && isPublicRoute) {
+    } else if (user && pathname === "/login") {
       router.replace("/dashboard");
     }
-  }, [user, authLoading, isPublicRoute, router]);
+  }, [user, authLoading, isPublicRoute, pathname, router]);
 
   // Full-screen loading spinner (auth check)
   if (authLoading) {

@@ -4,6 +4,7 @@
 import { create } from "zustand";
 import {
   Event,
+  EventResource,
   Speaker,
   Session,
   DelayRecord,
@@ -96,6 +97,7 @@ import {
   updateAIConversationInFirestore,
   deleteAIConversationInFirestore,
 } from "@/lib/firestore/ai-conversations";
+import { registerPublicEvent } from "@/lib/events-registry";
 
 export interface EventStoreState {
   events: Event[];
@@ -148,6 +150,12 @@ export interface EventStoreState {
   createEventFromPlan: (plan: EventPlan) => { ok: boolean; error?: string; eventId?: string };
   updateEvent: (id: string, data: Partial<Event>) => { ok: boolean; error?: string };
   deleteEvent: (id: string) => { ok: boolean; error?: string };
+  endEventAndArchive: (id: string) => { ok: boolean; error?: string };
+  addEventResource: (
+    eventId: string,
+    resource: Omit<EventResource, "id" | "uploadedAt">
+  ) => { ok: boolean; error?: string; resourceId?: string };
+  deleteEventResource: (eventId: string, resourceId: string) => { ok: boolean; error?: string };
 
   // Speakers
   addSpeaker: (data: Omit<Speaker, "id" | "createdAt">) => { ok: boolean; error?: string; speakerId?: string };
@@ -257,6 +265,15 @@ const initialData: PersistedSlice = {
   selectedScriptId: null,
 };
 
+export function generateAccessCode(): string {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let res = "";
+  for (let i = 0; i < 6; i++) {
+    res += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return res;
+}
+
 function generateId(): string {
   if (typeof crypto !== "undefined" && crypto.randomUUID) {
     return crypto.randomUUID();
@@ -288,6 +305,8 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
         endDate: e.endDate || ts.endDate,
         startDateTime: e.startDateTime || ts.startDateTime,
         endDateTime: e.endDateTime || ts.endDateTime,
+        accessCode: e.accessCode || generateAccessCode(),
+        resources: Array.isArray(e.resources) ? e.resources : [],
       };
     });
 
@@ -311,13 +330,21 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
     const initialLiveIds = Array.isArray(state.liveEventIds) ? state.liveEventIds : [];
     const derivedLiveSet = new Set<string>(initialLiveIds);
     normalizedEvents.forEach((e) => {
-      if (e.status === "Live") derivedLiveSet.add(e.id);
+      if (e.status === "Live" && !e.endedAt) derivedLiveSet.add(e.id);
     });
     normalizedSessions.forEach((s) => {
-      if (s.status === "Live") derivedLiveSet.add(s.eventId);
+      const p = normalizedEvents.find((ev) => ev.id === s.eventId);
+      if (s.status === "Live" && p && p.status !== "Completed" && !p.endedAt) derivedLiveSet.add(s.eventId);
     });
-    const finalLiveIds = Array.from(derivedLiveSet);
-    const initialSelectedId = state.selectedEventId || state.activeEventId || normalizedEvents[0]?.id || null;
+    const finalLiveIds = Array.from(derivedLiveSet).filter((id) => {
+      const ev = normalizedEvents.find((e) => e.id === id);
+      return ev && ev.status !== "Completed" && !ev.endedAt;
+    });
+
+    const activeList = normalizedEvents.filter((e) => e.status !== "Completed" && !e.endedAt);
+    const candidateId = state.selectedEventId || state.activeEventId;
+    const isCandidateActive = activeList.some((e) => e.id === candidateId);
+    const initialSelectedId = isCandidateActive ? candidateId : (activeList[0]?.id || null);
 
     set({
       ...state,
@@ -338,6 +365,15 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
       corruptionNotice: wasCorrupted && error ? error : null,
     });
 
+    // Automatically register all events in the public directory for instant audience code discovery
+    normalizedEvents.forEach((e) => {
+      registerPublicEvent(
+        e,
+        normalizedSessions.filter((s) => s.eventId === e.id),
+        (state.speakers || []).filter((s) => s.eventId === e.id)
+      );
+    });
+
     // Cloud Firestore synchronization (asynchronous)
     if (targetUserId) {
       getEventsFromFirestore(targetUserId)
@@ -355,6 +391,8 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
                 endDate: e.endDate || ts.endDate,
                 startDateTime: e.startDateTime || ts.startDateTime,
                 endDateTime: e.endDateTime || ts.endDateTime,
+                accessCode: e.accessCode || generateAccessCode(),
+                resources: Array.isArray(e.resources) ? e.resources : [],
               };
             });
 
@@ -476,12 +514,24 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
   clearCorruptionNotice: () => set({ corruptionNotice: null }),
 
   setActiveEvent: (id) => {
+    if (id) {
+      const target = get().events.find((e) => e.id === id);
+      if (target && (target.status === "Completed" || Boolean(target.endedAt))) {
+        return;
+      }
+    }
     set({ activeEventId: id, selectedEventId: id });
     const current = get();
     saveToStorage(current);
   },
 
   setSelectedEvent: (id) => {
+    if (id) {
+      const target = get().events.find((e) => e.id === id);
+      if (target && (target.status === "Completed" || Boolean(target.endedAt))) {
+        return;
+      }
+    }
     set({ selectedEventId: id, activeEventId: id });
     const current = get();
     saveToStorage(current);
@@ -515,7 +565,7 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
     const uid = get().activeUserId;
     if (uid) {
       createAIConversationInFirestore(uid, newConv).catch((err) => {
-        console.error("[Firestore createConversation failed]", err);
+        console.warn("[Firestore createConversation failed]", err);
       });
     }
 
@@ -548,7 +598,7 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
     const uid = get().activeUserId;
     if (uid) {
       deleteAIConversationInFirestore(uid, id).catch((err) => {
-        console.error("[Firestore deleteConversation failed]", err);
+        console.warn("[Firestore deleteConversation failed]", err);
       });
     }
 
@@ -574,7 +624,7 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
     const uid = get().activeUserId;
     if (uid) {
       updateAIConversationInFirestore(uid, id, { isSaved: nextSaved, updatedAt: now }).catch((err) => {
-        console.error("[Firestore toggleSaveConversation failed]", err);
+        console.warn("[Firestore toggleSaveConversation failed]", err);
       });
     }
 
@@ -601,7 +651,7 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
     const uid = get().activeUserId;
     if (uid) {
       updateAIConversationInFirestore(uid, id, { title: trimmed, updatedAt: now }).catch((err) => {
-        console.error("[Firestore renameConversation failed]", err);
+        console.warn("[Firestore renameConversation failed]", err);
       });
     }
 
@@ -639,7 +689,7 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
       const uid = get().activeUserId;
       if (uid) {
         createAIConversationInFirestore(uid, conv).catch((err) => {
-          console.error("[Firestore addMessageToConversation create failed]", err);
+          console.warn("[Firestore addMessageToConversation create failed]", err);
         });
       }
 
@@ -700,7 +750,7 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
         messages: updatedConv.messages,
         relatedEventIds: updatedConv.relatedEventIds,
       }).catch((err) => {
-        console.error("[Firestore addMessageToConversation update failed]", err);
+        console.warn("[Firestore addMessageToConversation update failed]", err);
       });
     }
 
@@ -737,7 +787,7 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
         updatedAt: now,
         messages: updatedConv.messages,
       }).catch((err) => {
-        console.error("[Firestore updateMessageInConversation update failed]", err);
+        console.warn("[Firestore updateMessageInConversation update failed]", err);
       });
     }
 
@@ -747,6 +797,9 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
   startLiveEvent: (eventId: string) => {
     const event = get().events.find((e) => e.id === eventId);
     if (!event) return { ok: false, error: "Event not found." };
+    if (event.status === "Completed" || Boolean(event.endedAt)) {
+      return { ok: false, error: "Archived past events cannot be restarted." };
+    }
 
     const now = Date.now();
     const updatedEvent: Event = {
@@ -779,10 +832,10 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
     const uid = get().activeUserId;
     if (uid) {
       updateEventInFirestore(uid, eventId, { status: "Live", updatedAt: now }).catch((err) => {
-        console.error("[Firestore startLiveEvent failed]", err);
+        console.warn("[Firestore startLiveEvent failed]", err);
       });
       createActivityLogInFirestore(uid, eventId, newLog).catch((err) => {
-        console.error("[Firestore log startLiveEvent failed]", err);
+        console.warn("[Firestore log startLiveEvent failed]", err);
       });
     }
 
@@ -797,6 +850,7 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
     const updatedEvent: Event = {
       ...event,
       status: "Completed",
+      endedAt: event.endedAt || now,
       updatedAt: now,
     };
 
@@ -819,11 +873,23 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
           : s
       );
       const nextLogs = [newLog, ...state.activityLogs];
+
+      // Reassign active event if the stopped event was active
+      const remainingActive = nextEvents.filter((e) => e.id !== eventId && e.status !== "Completed" && !e.endedAt);
+      const nextActiveId = (state.activeEventId === eventId || state.selectedEventId === eventId)
+        ? (remainingActive[0]?.id || null)
+        : state.activeEventId;
+      const nextSelectedId = (state.selectedEventId === eventId || state.activeEventId === eventId)
+        ? (remainingActive[0]?.id || null)
+        : state.selectedEventId;
+
       const updated = {
         events: nextEvents,
         liveEventIds: nextLiveIds,
         sessions: nextSessions,
         activityLogs: nextLogs,
+        activeEventId: nextActiveId,
+        selectedEventId: nextSelectedId,
       };
       saveToStorage({ ...state, ...updated });
       return updated;
@@ -831,18 +897,18 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
 
     const uid = get().activeUserId;
     if (uid) {
-      updateEventInFirestore(uid, eventId, { status: "Completed", updatedAt: now }).catch((err) => {
-        console.error("[Firestore stopLiveEvent failed]", err);
+      updateEventInFirestore(uid, eventId, { status: "Completed", endedAt: now, updatedAt: now }).catch((err) => {
+        console.warn("[Firestore stopLiveEvent failed]", err);
       });
       createActivityLogInFirestore(uid, eventId, newLog).catch((err) => {
-        console.error("[Firestore log stopLiveEvent failed]", err);
+        console.warn("[Firestore log stopLiveEvent failed]", err);
       });
       liveSessions.forEach((s) => {
         updateSessionInFirestore(uid, eventId, s.id, {
           status: "Completed",
           actualEndTime: now,
         }).catch((err) => {
-          console.error("[Firestore complete live session failed]", err);
+          console.warn("[Firestore complete live session failed]", err);
         });
       });
     }
@@ -852,6 +918,7 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
 
   isEventLive: (eventId: string) => {
     const ev = get().events.find((e) => e.id === eventId);
+    if (!ev || ev.status === "Completed" || Boolean(ev.endedAt)) return false;
     if (ev?.status === "Live") return true;
     if (get().liveEventIds.includes(eventId)) return true;
     return get().sessions.some((s) => s.eventId === eventId && s.status === "Live");
@@ -882,6 +949,9 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
       endTime: ts.endTime,
       startDateTime: ts.startDateTime,
       endDateTime: ts.endDateTime,
+      accessCode: data.accessCode || generateAccessCode(),
+      resources: Array.isArray(data.resources) ? data.resources : [],
+      status: data.status || "Scheduled",
       createdAt: now,
       updatedAt: now,
     };
@@ -909,14 +979,16 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
       return updated;
     });
 
+    registerPublicEvent(newEvent);
+
     // Asynchronously write to Cloud Firestore
     const uid = get().activeUserId;
     if (uid) {
       createEventInFirestore(uid, newEvent).catch((err) => {
-        console.error("[Firestore createEvent failed]", err);
+        console.warn("[Firestore createEvent failed]", err);
       });
       createActivityLogInFirestore(uid, id, newLog).catch((err) => {
-        console.error("[Firestore log createEvent failed]", err);
+        console.warn("[Firestore log createEvent failed]", err);
       });
     }
 
@@ -927,15 +999,12 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
     if (!plan || !plan.name?.trim()) {
       return { ok: false, error: "Event name is required." };
     }
-    if (!plan.venue?.trim()) {
-      return { ok: false, error: "Venue is required." };
-    }
-
     const todayStr = new Date().toISOString().split("T")[0];
     const startDate = plan.startDate || todayStr;
     const endDate = plan.endDate || startDate;
     const startTime = plan.startTime || "09:00";
     const endTime = plan.endTime || "17:00";
+    const venue = plan.venue?.trim() || "Main Auditorium / Venue TBA";
 
     const eventRes = get().createEvent({
       name: plan.name.trim(),
@@ -945,7 +1014,7 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
       date: startDate,
       startTime,
       endTime,
-      venue: plan.venue.trim(),
+      venue,
       description: plan.description || "",
       organizer: plan.organizer || "",
     });
@@ -1092,6 +1161,10 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
     const event = get().events.find((e) => e.id === id);
     if (!event) return { ok: false, error: "Event not found." };
 
+    if ((event.status === "Completed" || Boolean(event.endedAt)) && data.status && data.status !== "Completed") {
+      return { ok: false, error: "Archived past events cannot be restarted or changed to an active status." };
+    }
+
     const merged = { ...event, ...data };
     const val = validateEvent(merged);
     if (!val.valid) {
@@ -1134,10 +1207,10 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
     const uid = get().activeUserId;
     if (uid) {
       updateEventInFirestore(uid, id, updatedEvent).catch((err) => {
-        console.error("[Firestore updateEvent failed]", err);
+        console.warn("[Firestore updateEvent failed]", err);
       });
       createActivityLogInFirestore(uid, id, newLog).catch((err) => {
-        console.error("[Firestore log updateEvent failed]", err);
+        console.warn("[Firestore log updateEvent failed]", err);
       });
     }
 
@@ -1181,7 +1254,203 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
     const uid = get().activeUserId;
     if (uid) {
       deleteEventFromFirestore(uid, id).catch((err) => {
-        console.error("[Firestore deleteEvent failed]", err);
+        console.warn("[Firestore deleteEvent failed]", err);
+      });
+    }
+
+    return { ok: true };
+  },
+
+  endEventAndArchive: (id: string) => {
+    const event = get().events.find((e) => e.id === id);
+    if (!event) return { ok: false, error: "Event not found." };
+
+    const now = Date.now();
+    const updatedEvent: Event = {
+      ...event,
+      status: "Completed",
+      endedAt: now,
+      updatedAt: now,
+    };
+
+    const nextLiveIds = get().liveEventIds.filter((lid) => lid !== id);
+    const liveSessions = get().sessions.filter((s) => s.eventId === id && s.status === "Live");
+
+    const newLog: ActivityLog = {
+      id: generateId(),
+      eventId: id,
+      type: "event_archived",
+      message: `Event "${event.name}" marked as completed and moved to Past Events Archive`,
+      timestamp: now,
+    };
+
+    set((state) => {
+      const nextEvents = state.events.map((e) => (e.id === id ? updatedEvent : e));
+      const nextSessions = state.sessions.map((s) =>
+        s.eventId === id && s.status === "Live"
+          ? { ...s, status: "Completed" as const, actualEndTime: now }
+          : s
+      );
+      const nextLogs = [newLog, ...state.activityLogs];
+
+      // Reassign active event if the archived event was active
+      const remainingActive = nextEvents.filter((e) => e.id !== id && e.status !== "Completed" && !e.endedAt);
+      const nextActiveId = (state.activeEventId === id || state.selectedEventId === id)
+        ? (remainingActive[0]?.id || null)
+        : state.activeEventId;
+      const nextSelectedId = (state.selectedEventId === id || state.activeEventId === id)
+        ? (remainingActive[0]?.id || null)
+        : state.selectedEventId;
+
+      const updated = {
+        events: nextEvents,
+        liveEventIds: nextLiveIds,
+        sessions: nextSessions,
+        activityLogs: nextLogs,
+        activeEventId: nextActiveId,
+        selectedEventId: nextSelectedId,
+      };
+      saveToStorage({ ...state, ...updated });
+      return updated;
+    });
+
+    const uid = get().activeUserId;
+    if (uid) {
+      updateEventInFirestore(uid, id, { status: "Completed", endedAt: now, updatedAt: now }).catch((err) => {
+        console.warn("[Firestore endEventAndArchive failed]", err);
+      });
+      createActivityLogInFirestore(uid, id, newLog).catch((err) => {
+        console.warn("[Firestore log endEventAndArchive failed]", err);
+      });
+      liveSessions.forEach((s) => {
+        updateSessionInFirestore(uid, id, s.id, {
+          status: "Completed",
+          actualEndTime: now,
+        }).catch((err) => {
+          console.warn("[Firestore complete live session failed]", err);
+        });
+      });
+    }
+
+    return { ok: true };
+  },
+
+  addEventResource: (eventId, resource) => {
+    const event = get().events.find((e) => e.id === eventId);
+    if (!event) return { ok: false, error: "Event not found." };
+
+    if (!resource.title?.trim()) {
+      return { ok: false, error: "Resource title is required." };
+    }
+    if (!resource.url?.trim()) {
+      return { ok: false, error: "Resource URL or link/content is required." };
+    }
+
+    const resId = generateId();
+    const now = Date.now();
+    const newResource: EventResource = {
+      id: resId,
+      type: resource.type,
+      title: resource.title.trim(),
+      url: resource.url.trim(),
+      description: resource.description?.trim() || undefined,
+      uploadedAt: now,
+      author: resource.author?.trim() || undefined,
+      isLocalFile: resource.isLocalFile,
+      fileName: resource.fileName,
+      fileSize: resource.fileSize,
+      fileMimeType: resource.fileMimeType,
+    };
+
+    const updatedResources = [...(event.resources || []), newResource];
+    const updatedEvent: Event = {
+      ...event,
+      resources: updatedResources,
+      updatedAt: now,
+    };
+
+    const newLog: ActivityLog = {
+      id: generateId(),
+      eventId,
+      type: "resource_added",
+      message: `Added ${resource.type.toUpperCase()} resource: "${newResource.title}"`,
+      timestamp: now,
+    };
+
+    set((state) => {
+      const nextEvents = state.events.map((e) => (e.id === eventId ? updatedEvent : e));
+      const nextLogs = [newLog, ...state.activityLogs];
+      const updated = {
+        events: nextEvents,
+        activityLogs: nextLogs,
+      };
+      saveToStorage({ ...state, ...updated });
+      return updated;
+    });
+
+    // Register with public events directory so audience can access immediately
+    const curState = get();
+    registerPublicEvent(
+      updatedEvent,
+      curState.sessions.filter((s) => s.eventId === eventId),
+      curState.speakers.filter((s) => s.eventId === eventId)
+    );
+
+    const uid = get().activeUserId;
+    if (uid) {
+      updateEventInFirestore(uid, eventId, {
+        resources: updatedResources,
+        updatedAt: now,
+      }).catch((err) => {
+        console.warn("[Firestore addEventResource failed]", err);
+      });
+      createActivityLogInFirestore(uid, eventId, newLog).catch((err) => {
+        console.warn("[Firestore log addEventResource failed]", err);
+      });
+    }
+
+    return { ok: true, resourceId: resId };
+  },
+
+  deleteEventResource: (eventId, resourceId) => {
+    const event = get().events.find((e) => e.id === eventId);
+    if (!event) return { ok: false, error: "Event not found." };
+
+    const targetResource = (event.resources || []).find((r) => r.id === resourceId);
+    const updatedResources = (event.resources || []).filter((r) => r.id !== resourceId);
+    const now = Date.now();
+    const updatedEvent: Event = {
+      ...event,
+      resources: updatedResources,
+      updatedAt: now,
+    };
+
+    const newLog: ActivityLog = {
+      id: generateId(),
+      eventId,
+      type: "resource_deleted",
+      message: `Deleted resource: "${targetResource?.title || resourceId}"`,
+      timestamp: now,
+    };
+
+    set((state) => {
+      const nextEvents = state.events.map((e) => (e.id === eventId ? updatedEvent : e));
+      const nextLogs = [newLog, ...state.activityLogs];
+      const updated = {
+        events: nextEvents,
+        activityLogs: nextLogs,
+      };
+      saveToStorage({ ...state, ...updated });
+      return updated;
+    });
+
+    const uid = get().activeUserId;
+    if (uid) {
+      updateEventInFirestore(uid, eventId, {
+        resources: updatedResources,
+        updatedAt: now,
+      }).catch((err) => {
+        console.warn("[Firestore deleteEventResource failed]", err);
       });
     }
 
@@ -1227,10 +1496,10 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
     const uid = get().activeUserId;
     if (uid) {
       createSpeakerInFirestore(uid, data.eventId, newSpeaker).catch((err) => {
-        console.error("[Firestore addSpeaker failed]", err);
+        console.warn("[Firestore addSpeaker failed]", err);
       });
       createActivityLogInFirestore(uid, data.eventId, newLog).catch((err) => {
-        console.error("[Firestore log addSpeaker failed]", err);
+        console.warn("[Firestore log addSpeaker failed]", err);
       });
     }
 
@@ -1269,10 +1538,10 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
     const uid = get().activeUserId;
     if (uid) {
       updateSpeakerInFirestore(uid, speaker.eventId, id, merged).catch((err) => {
-        console.error("[Firestore updateSpeaker failed]", err);
+        console.warn("[Firestore updateSpeaker failed]", err);
       });
       createActivityLogInFirestore(uid, speaker.eventId, newLog).catch((err) => {
-        console.error("[Firestore log updateSpeaker failed]", err);
+        console.warn("[Firestore log updateSpeaker failed]", err);
       });
     }
 
@@ -1306,17 +1575,17 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
     const uid = get().activeUserId;
     if (uid) {
       deleteSpeakerInFirestore(uid, speaker.eventId, id).catch((err) => {
-        console.error("[Firestore deleteSpeaker failed]", err);
+        console.warn("[Firestore deleteSpeaker failed]", err);
       });
       createActivityLogInFirestore(uid, speaker.eventId, newLog).catch((err) => {
-        console.error("[Firestore log deleteSpeaker failed]", err);
+        console.warn("[Firestore log deleteSpeaker failed]", err);
       });
       // Nullify speakerId in affected sessions in Firestore
       get().sessions
         .filter((s) => s.eventId === speaker.eventId && s.speakerId === null)
         .forEach((s) => {
           updateSessionInFirestore(uid, speaker.eventId, s.id, { speakerId: null }).catch((err) => {
-            console.error("[Firestore nullify speaker on session failed]", err);
+            console.warn("[Firestore nullify speaker on session failed]", err);
           });
         });
     }
@@ -1388,10 +1657,10 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
     const uid = get().activeUserId;
     if (uid) {
       createSessionInFirestore(uid, data.eventId, newSession).catch((err) => {
-        console.error("[Firestore addSession failed]", err);
+        console.warn("[Firestore addSession failed]", err);
       });
       createActivityLogInFirestore(uid, data.eventId, newLog).catch((err) => {
-        console.error("[Firestore log addSession failed]", err);
+        console.warn("[Firestore log addSession failed]", err);
       });
     }
 
@@ -1463,10 +1732,10 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
     const uid = get().activeUserId;
     if (uid) {
       updateSessionInFirestore(uid, session.eventId, id, updatedSession).catch((err) => {
-        console.error("[Firestore updateSession failed]", err);
+        console.warn("[Firestore updateSession failed]", err);
       });
       createActivityLogInFirestore(uid, session.eventId, newLog).catch((err) => {
-        console.error("[Firestore log updateSession failed]", err);
+        console.warn("[Firestore log updateSession failed]", err);
       });
     }
 
@@ -1502,10 +1771,10 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
     const uid = get().activeUserId;
     if (uid) {
       deleteSessionInFirestore(uid, session.eventId, id).catch((err) => {
-        console.error("[Firestore deleteSession failed]", err);
+        console.warn("[Firestore deleteSession failed]", err);
       });
       createActivityLogInFirestore(uid, session.eventId, newLog).catch((err) => {
-        console.error("[Firestore log deleteSession failed]", err);
+        console.warn("[Firestore log deleteSession failed]", err);
       });
     }
 
@@ -1596,10 +1865,10 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
     if (uid) {
       const affected = Array.from(updatedMap.values());
       batchUpdateSessionsInFirestore(uid, eventId, affected).catch((err) => {
-        console.error("[Firestore reorderSessions failed]", err);
+        console.warn("[Firestore reorderSessions failed]", err);
       });
       createActivityLogInFirestore(uid, eventId, newLog).catch((err) => {
-        console.error("[Firestore log reorderSessions failed]", err);
+        console.warn("[Firestore log reorderSessions failed]", err);
       });
     }
 
@@ -1609,6 +1878,11 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
   startSession: (id) => {
     const session = get().sessions.find((s) => s.id === id);
     if (!session) return { ok: false, error: "Session not found." };
+
+    const parentEvent = get().events.find((e) => e.id === session.eventId);
+    if (parentEvent && (parentEvent.status === "Completed" || Boolean(parentEvent.endedAt))) {
+      return { ok: false, error: "Cannot start sessions for an archived past event." };
+    }
 
     // Check if another session is live
     const activeLive = get().sessions.find((s) => s.eventId === session.eventId && s.status === "Live");
@@ -1652,16 +1926,16 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
     const uid = get().activeUserId;
     if (uid) {
       updateEventInFirestore(uid, session.eventId, { status: "Live", updatedAt: now }).catch((err) => {
-        console.error("[Firestore updateEvent on startSession failed]", err);
+        console.warn("[Firestore updateEvent on startSession failed]", err);
       });
       updateSessionInFirestore(uid, session.eventId, id, {
         status: "Live",
         actualStartTime: now,
       }).catch((err) => {
-        console.error("[Firestore startSession failed]", err);
+        console.warn("[Firestore startSession failed]", err);
       });
       createActivityLogInFirestore(uid, session.eventId, newLog).catch((err) => {
-        console.error("[Firestore log startSession failed]", err);
+        console.warn("[Firestore log startSession failed]", err);
       });
     }
 
@@ -1701,10 +1975,10 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
         status: "Completed",
         actualEndTime: now,
       }).catch((err) => {
-        console.error("[Firestore completeSession failed]", err);
+        console.warn("[Firestore completeSession failed]", err);
       });
       createActivityLogInFirestore(uid, session.eventId, newLog).catch((err) => {
-        console.error("[Firestore log completeSession failed]", err);
+        console.warn("[Firestore log completeSession failed]", err);
       });
     }
 
@@ -1748,10 +2022,10 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
         status: "Skipped",
         actualEndTime,
       }).catch((err) => {
-        console.error("[Firestore skipSession failed]", err);
+        console.warn("[Firestore skipSession failed]", err);
       });
       createActivityLogInFirestore(uid, session.eventId, newLog).catch((err) => {
-        console.error("[Firestore log skipSession failed]", err);
+        console.warn("[Firestore log skipSession failed]", err);
       });
     }
 
@@ -1877,7 +2151,7 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
     const uid = get().activeUserId;
     if (uid) {
       createDelayInFirestore(uid, anchor.eventId, delayRecord).catch((err) => {
-        console.error("[Firestore createDelay failed]", err);
+        console.warn("[Firestore createDelay failed]", err);
       });
 
       const affected = preview.proposedSessions.filter((ps) =>
@@ -1885,12 +2159,12 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
       );
       if (affected.length > 0) {
         batchUpdateSessionsInFirestore(uid, anchor.eventId, affected).catch((err) => {
-          console.error("[Firestore commitDelay batchUpdateSessions failed]", err);
+          console.warn("[Firestore commitDelay batchUpdateSessions failed]", err);
         });
       }
 
       batchCreateActivityLogsInFirestore(uid, anchor.eventId, newLogs).catch((err) => {
-        console.error("[Firestore commitDelay batchCreateActivityLogs failed]", err);
+        console.warn("[Firestore commitDelay batchCreateActivityLogs failed]", err);
       });
     }
 
@@ -1936,10 +2210,10 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
     const uid = get().activeUserId;
     if (uid) {
       createEmergencyInFirestore(uid, activeEventId, emergency).catch((err) => {
-        console.error("[Firestore activateEmergency failed]", err);
+        console.warn("[Firestore activateEmergency failed]", err);
       });
       createActivityLogInFirestore(uid, activeEventId, newLog).catch((err) => {
-        console.error("[Firestore log activateEmergency failed]", err);
+        console.warn("[Firestore log activateEmergency failed]", err);
       });
     }
 
@@ -1973,10 +2247,10 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
     const uid = get().activeUserId;
     if (uid) {
       updateEmergencyInFirestore(uid, emg.eventId, id, { resolved: true, resolvedAt: now }).catch((err) => {
-        console.error("[Firestore resolveEmergency failed]", err);
+        console.warn("[Firestore resolveEmergency failed]", err);
       });
       createActivityLogInFirestore(uid, emg.eventId, newLog).catch((err) => {
-        console.error("[Firestore log resolveEmergency failed]", err);
+        console.warn("[Firestore log resolveEmergency failed]", err);
       });
     }
 
@@ -2017,7 +2291,7 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
     const uid = get().activeUserId;
     if (uid) {
       createActivityLogInFirestore(uid, activeEventId, newLog).catch((err) => {
-        console.error("[Firestore createAnnouncement failed]", err);
+        console.warn("[Firestore createAnnouncement failed]", err);
       });
     }
 
@@ -2057,10 +2331,10 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
     const uid = get().activeUserId;
     if (uid) {
       createAIRecordInFirestore(uid, data.eventId, aiRecord).catch((err) => {
-        console.error("[Firestore addAIRecord failed]", err);
+        console.warn("[Firestore addAIRecord failed]", err);
       });
       createActivityLogInFirestore(uid, data.eventId, newLog).catch((err) => {
-        console.error("[Firestore log addAIRecord failed]", err);
+        console.warn("[Firestore log addAIRecord failed]", err);
       });
     }
 
@@ -2094,7 +2368,7 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
     const uid = get().activeUserId;
     if (uid) {
       createScriptInFirestore(uid, data.eventId, scriptItem).catch((err) => {
-        console.error("[Firestore addScript failed]", err);
+        console.warn("[Firestore addScript failed]", err);
       });
     }
 
@@ -2121,7 +2395,7 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
     const uid = get().activeUserId;
     if (uid) {
       updateScriptInFirestore(uid, script.eventId, id, updates).catch((err) => {
-        console.error("[Firestore updateScript failed]", err);
+        console.warn("[Firestore updateScript failed]", err);
       });
     }
 
@@ -2142,7 +2416,7 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
     const uid = get().activeUserId;
     if (uid) {
       deleteScriptInFirestore(uid, script.eventId, id).catch((err) => {
-        console.error("[Firestore deleteScript failed]", err);
+        console.warn("[Firestore deleteScript failed]", err);
       });
     }
 
@@ -2170,7 +2444,7 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
     const uid = get().activeUserId;
     if (uid) {
       createInvitationInFirestore(uid, data.eventId, invitationRecord).catch((err) => {
-        console.error("[Firestore addInvitation failed]", err);
+        console.warn("[Firestore addInvitation failed]", err);
       });
     }
 
@@ -2197,7 +2471,7 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
     const uid = get().activeUserId;
     if (uid) {
       updateInvitationInFirestore(uid, inv.eventId, id, updates).catch((err) => {
-        console.error("[Firestore updateInvitation failed]", err);
+        console.warn("[Firestore updateInvitation failed]", err);
       });
     }
 
@@ -2218,7 +2492,7 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
     const uid = get().activeUserId;
     if (uid) {
       deleteInvitationInFirestore(uid, inv.eventId, id).catch((err) => {
-        console.error("[Firestore deleteInvitation failed]", err);
+        console.warn("[Firestore deleteInvitation failed]", err);
       });
     }
 
@@ -2252,6 +2526,38 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
       case "CREATE_EVENT": {
         const rawName = (payload.name || payload.title || payload.targetEventName || "New Stage Event") as string;
         const cleanName = rawName.replace(/\[.*?\]/g, "").trim() || "New Stage Event";
+
+        // If action includes full plan with sessions or people, execute via createEventFromPlan
+        if (
+          (Array.isArray(payload.sessions) && payload.sessions.length > 0) ||
+          (Array.isArray(payload.people) && payload.people.length > 0)
+        ) {
+          const planRes = get().createEventFromPlan({
+            name: cleanName,
+            type: (payload.type || payload.eventType || "Other") as any,
+            startDate: (payload.startDate || payload.date || new Date().toISOString().split("T")[0]) as string,
+            endDate: (payload.endDate || payload.startDate || payload.date || new Date().toISOString().split("T")[0]) as string,
+            startTime: (payload.startTime || "09:00") as string,
+            endTime: (payload.endTime || "17:00") as string,
+            venue: (payload.venue || payload.location || "Main Auditorium / Venue TBA") as string,
+            description: (payload.description || "") as string,
+            organizer: (payload.organizer || "Stage Operations") as string,
+            people: (payload.people as any) || [],
+            sessions: (payload.sessions as any) || [],
+            scripts: (payload.scripts as any) || [],
+            invitation: (payload.invitation as any) || undefined,
+          });
+
+          if (planRes.ok && planRes.eventId) {
+            return {
+              actionId: action.id,
+              type: action.type,
+              success: true,
+              message: `Successfully created event "${cleanName}" with ${(payload.sessions as any[])?.length || 0} agenda sessions and ${(payload.people as any[])?.length || 0} speakers.`,
+              entityId: planRes.eventId,
+            };
+          }
+        }
         const startDate = (payload.startDate || payload.date || new Date().toISOString().split("T")[0]) as string;
         const endDate = (payload.endDate || startDate) as string;
         const startTime = (payload.startTime || "10:00") as string;

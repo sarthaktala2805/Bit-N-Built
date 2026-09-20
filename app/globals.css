@@ -7,11 +7,24 @@
   --foreground: #F8FAFC;
 }
 
+html,
 body {
   color: var(--foreground);
   background: var(--background);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   overflow-x: hidden;
+  cursor: default;
+}
+
+/* Eliminate blinking cursor (caret) on non-editable elements */
+*:not(input):not(textarea):not([contenteditable="true"]) {
+  caret-color: transparent !important;
+}
+
+input,
+textarea,
+[contenteditable="true"] {
+  caret-color: #3b82f6 !important;
 }
 
 /* Custom smooth dark scrollbar */

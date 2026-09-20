@@ -122,6 +122,8 @@ export default function ScriptsPage() {
   const [genCustomPrompt, setGenCustomPrompt] = useState<string>("");
   const [genLanguage, setGenLanguage] = useState<string>("English");
   const [genTone, setGenTone] = useState<"Formal" | "Energetic" | "Warm" | "Humorous">("Warm");
+  const [genDurationMinutes, setGenDurationMinutes] = useState<number>(5);
+  const [genIsCustomDuration, setGenIsCustomDuration] = useState<boolean>(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
 
@@ -303,6 +305,7 @@ export default function ScriptsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           requestType: "role_script",
+          durationMinutes: genDurationMinutes,
           role:
             genCategory === "anchor"
               ? "Anchor"
@@ -318,6 +321,7 @@ export default function ScriptsPage() {
           prompt: genCustomPrompt || `Generate stage-ready ${genScriptType} for ${currentEvent.name}`,
           language: genLanguage,
           context: {
+            durationMinutes: genDurationMinutes,
             event: {
               name: currentEvent.name,
               type: currentEvent.type,
@@ -336,6 +340,7 @@ export default function ScriptsPage() {
               : undefined,
             request: {
               tone: genTone,
+              durationMinutes: genDurationMinutes,
             },
           },
         }),
@@ -633,13 +638,22 @@ export default function ScriptsPage() {
                       <div>
                         <div className="flex items-start justify-between gap-3 mb-2.5">
                           <div>
-                            <div className="flex items-center gap-2 mb-1">
+                            <div className="flex items-center gap-2 mb-1 flex-wrap">
                               <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
                                 {script.category}
                               </span>
                               <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 border border-slate-700">
                                 {script.language || "English"}
                               </span>
+                              {(() => {
+                                const wordsCount = activeText.split(/\s+/).filter(Boolean).length;
+                                const approxMins = Math.max(1, Math.round(wordsCount / 125));
+                                return (
+                                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md bg-emerald-950/60 text-emerald-300 border border-emerald-800/60">
+                                    ⏱️ ~{approxMins}m ({wordsCount} words)
+                                  </span>
+                                );
+                              })()}
                             </div>
                             <h3 className="text-sm font-bold text-white tracking-tight">{script.title}</h3>
                             {script.targetName && (
@@ -1074,6 +1088,74 @@ export default function ScriptsPage() {
                       {tone}
                     </button>
                   ))}
+                </div>
+              </div>
+
+              {/* Target Speech / Script Duration */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-slate-400 font-medium">Script Length & Duration (लंबाई)</label>
+                  <span className="text-[11px] font-medium text-slate-300">
+                    <span className={genDurationMinutes >= 15 ? "text-amber-400 font-bold" : "text-emerald-400"}>
+                      {genDurationMinutes >= 60
+                        ? "🔥 Marathon Keynote"
+                        : genDurationMinutes >= 30
+                        ? "⚡ Extended Address"
+                        : genDurationMinutes >= 15
+                        ? "🎙️ In-Depth Keynote"
+                        : "⏱️ Stage Address"}
+                    </span>{" "}
+                    (~{Math.round(genDurationMinutes * 125).toLocaleString()} words)
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {[2, 5, 10, 15, 20, 30, 45, 60].map((mins) => (
+                    <button
+                      key={mins}
+                      type="button"
+                      onClick={() => {
+                        setGenDurationMinutes(mins);
+                        setGenIsCustomDuration(false);
+                      }}
+                      className={`px-2.5 py-1 rounded-lg border text-xs font-medium transition ${
+                        !genIsCustomDuration && genDurationMinutes === mins
+                          ? "bg-blue-600 text-white border-blue-500 font-bold"
+                          : "bg-slate-950 border-slate-800 text-slate-400 hover:text-white"
+                      }`}
+                    >
+                      {mins}m
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setGenIsCustomDuration(!genIsCustomDuration)}
+                    className={`px-2.5 py-1 rounded-lg border text-xs font-medium transition ${
+                      genIsCustomDuration
+                        ? "bg-indigo-600 text-white border-indigo-500 font-bold"
+                        : "bg-slate-950 border-slate-800 text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    Custom
+                  </button>
+
+                  {genIsCustomDuration && (
+                    <div className="flex items-center gap-1 bg-slate-950 px-2 py-1 rounded-lg border border-indigo-500/50 text-xs">
+                      <span className="text-slate-400">Set:</span>
+                      <input
+                        type="number"
+                        min="1"
+                        max="180"
+                        value={genDurationMinutes}
+                        onChange={(e) => {
+                          const val = Math.max(1, Math.min(180, parseInt(e.target.value) || 1));
+                          setGenDurationMinutes(val);
+                        }}
+                        className="w-14 bg-slate-900 border border-slate-700 text-white font-mono text-xs rounded px-1.5 py-0.5 text-center focus:border-indigo-400 focus:outline-none"
+                      />
+                      <span className="text-slate-400">min</span>
+                    </div>
+                  )}
                 </div>
               </div>
 

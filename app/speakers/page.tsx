@@ -21,7 +21,10 @@ export default function SpeakersPage() {
   const router = useRouter();
   const { events, activeEventId, speakers, sessions, deleteSpeaker } = useEventStore();
 
-  const activeEvent = events.find((e) => e.id === activeEventId);
+  const isEventEnded = (e: { status?: string; endedAt?: number | null }) =>
+    e.status === "Completed" || Boolean(e.endedAt);
+  const activeEvents = events.filter((e) => !isEventEnded(e));
+  const activeEvent = activeEvents.find((e) => e.id === activeEventId) || activeEvents[0] || null;
   const eventSpeakers = activeEvent ? speakers.filter((s) => s.eventId === activeEvent.id) : [];
   const eventSessions = activeEvent ? sessions.filter((s) => s.eventId === activeEvent.id) : [];
 

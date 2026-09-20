@@ -2,11 +2,17 @@
 
 import React, { useState } from "react";
 import Image from "next/image";
-import { Loader2, Mail, Lock, Eye, EyeOff, Sparkles } from "lucide-react";
+import { Loader2, Mail, Lock, Eye, EyeOff, Sparkles, KeyRound, Users, ShieldCheck, ArrowRight } from "lucide-react";
 import { useAuth, getAuthErrorMessage } from "@/contexts/auth-context";
+import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
-  const { signInEmail, signUpEmail, signInGoogle } = useAuth();
+  const router = useRouter();
+  const { signInEmail, signUpEmail, signInGoogle, signInGuestOrganizer } = useAuth();
+
+  const [role, setRole] = useState<"organizer" | "audience">("organizer");
+  const [audienceCode, setAudienceCode] = useState("");
+  const [codeError, setCodeError] = useState<string | null>(null);
 
   const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
@@ -15,6 +21,17 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const handleAudienceSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const clean = audienceCode.trim().toUpperCase();
+    if (clean.length !== 6) {
+      setCodeError("Please enter a valid 6-character access code.");
+      return;
+    }
+    setCodeError(null);
+    router.push(`/audience?code=${clean}`);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -75,24 +92,119 @@ export default function LoginPage() {
           </p>
         </div>
 
+        {/* Primary Role Switcher: Organizer vs Audience */}
+        <div className="grid grid-cols-2 gap-2 p-1.5 rounded-2xl bg-slate-900/90 border border-slate-700/80 mb-4 shadow-xl">
+          <button
+            type="button"
+            onClick={() => { setRole("organizer"); setError(null); }}
+            className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs font-semibold transition-all duration-200 ${
+              role === "organizer"
+                ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-900/30"
+                : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/40"
+            }`}
+          >
+            <ShieldCheck className="w-4 h-4 text-blue-300" />
+            Organizer Login
+          </button>
+          <button
+            type="button"
+            onClick={() => { setRole("audience"); setCodeError(null); }}
+            className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs font-semibold transition-all duration-200 ${
+              role === "audience"
+                ? "bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-md shadow-amber-900/30"
+                : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/40"
+            }`}
+          >
+            <Users className="w-4 h-4 text-amber-300" />
+            Audience Code Portal
+          </button>
+        </div>
+
         {/* Glass card */}
         <div className="bg-slate-900/80 backdrop-blur-xl border border-slate-700/60 rounded-2xl shadow-2xl shadow-black/40 p-8">
-          {/* Tab switcher */}
-          <div className="flex rounded-xl bg-slate-800/60 p-1 mb-6">
-            {(["login", "register"] as const).map((tab) => (
-              <button
-                key={tab}
-                onClick={() => { setMode(tab); setError(null); }}
-                className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all duration-200 ${
-                  mode === tab
-                    ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md"
-                    : "text-slate-400 hover:text-slate-200"
-                }`}
-              >
-                {tab === "login" ? "Sign In" : "Create Account"}
-              </button>
-            ))}
-          </div>
+          {role === "audience" ? (
+            /* Audience Portal: 6-Character Code Entry */
+            <div>
+              <div className="text-center mb-6">
+                <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center mx-auto mb-3 text-amber-400">
+                  <KeyRound className="w-6 h-6" />
+                </div>
+                <h2 className="text-lg font-bold text-white">Attendee & Audience Access</h2>
+                <p className="text-xs text-slate-400 mt-1">
+                  Enter your 6-character alphanumeric event code to watch videos, download PPTs, and view event scripts.
+                </p>
+              </div>
+
+              {codeError && (
+                <div className="mb-4 px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs leading-relaxed">
+                  {codeError}
+                </div>
+              )}
+
+              <form onSubmit={handleAudienceSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2 text-center">
+                    6-Character Event Code
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      maxLength={6}
+                      value={audienceCode}
+                      onChange={(e) => {
+                        const val = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+                        setAudienceCode(val);
+                        if (codeError) setCodeError(null);
+                      }}
+                      placeholder="e.g. ST8X9B"
+                      autoFocus
+                      className="w-full text-center font-mono text-2xl tracking-[0.35em] font-bold py-3.5 bg-slate-950/70 border-2 border-amber-500/40 rounded-xl text-amber-300 placeholder:text-slate-600 focus:outline-none focus:border-amber-400 focus:ring-4 focus:ring-amber-500/20 transition-all uppercase selection:bg-amber-500 selection:text-black"
+                    />
+                  </div>
+                  <p className="text-[11px] text-slate-500 text-center mt-2">
+                    Case-insensitive · Ask your event host for the 6-character code
+                  </p>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={audienceCode.trim().length !== 6}
+                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white shadow-lg shadow-amber-900/30 transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Enter Event Portal
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+              </form>
+
+              <div className="mt-6 pt-4 border-t border-slate-800 text-center">
+                <button
+                  type="button"
+                  onClick={() => setRole("organizer")}
+                  className="text-xs text-slate-400 hover:text-blue-400 transition"
+                >
+                  Are you an organizer? <span className="font-semibold text-blue-400 underline">Sign in here</span>
+                </button>
+              </div>
+            </div>
+          ) : (
+            /* Organizer Portal: Firebase Auth */
+            <>
+              {/* Tab switcher */}
+              <div className="flex rounded-xl bg-slate-800/60 p-1 mb-6">
+                {(["login", "register"] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    onClick={() => { setMode(tab); setError(null); }}
+                    className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all duration-200 ${
+                      mode === tab
+                        ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md"
+                        : "text-slate-400 hover:text-slate-200"
+                    }`}
+                  >
+                    {tab === "login" ? "Organizer Sign In" : "Register Organizer"}
+                  </button>
+                ))}
+              </div>
 
           {/* Error message */}
           {error && (
@@ -202,7 +314,25 @@ export default function LoginPage() {
             )}
             {googleLoading ? "Connecting to Google…" : "Continue with Google"}
           </button>
-        </div>
+
+          {/* Instant 1-Click Organizer Access */}
+          <div className="mt-4 pt-4 border-t border-slate-800/80">
+            <button
+              type="button"
+              onClick={async () => {
+                setError(null);
+                await signInGuestOrganizer();
+                router.replace("/dashboard");
+              }}
+              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-semibold bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-300 hover:text-blue-200 transition-all duration-200 shadow-sm"
+            >
+              <ShieldCheck className="w-4 h-4 text-blue-400" />
+              One-Click Organizer Access (Direct Entry)
+            </button>
+          </div>
+        </>
+      )}
+    </div>
 
         {/* Footer */}
         <p className="text-center text-[11px] text-slate-500 mt-6">

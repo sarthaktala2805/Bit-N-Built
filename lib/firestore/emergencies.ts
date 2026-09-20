@@ -103,7 +103,7 @@ export async function createEmergencyInFirestore(
     await setDoc(emergencyRef, serialized);
     return { ok: true };
   } catch (err) {
-    console.error(`[Firestore createEmergency error] user=${userId} event=${eventId} emergency=${emergency.id}:`, err);
+    console.warn(`[Firestore createEmergency warning] user=${userId} event=${eventId} emergency=${emergency.id}:`, err);
     return { ok: false, error: handleFirestoreError(err) };
   }
 }
@@ -141,7 +141,7 @@ export async function getEmergenciesFromFirestore(
 
     return { ok: true, data: emergencies };
   } catch (err) {
-    console.error(`[Firestore getEmergencies error] user=${userId} event=${eventId}:`, err);
+    console.warn(`[Firestore getEmergencies warning] user=${userId} event=${eventId}:`, err);
     return { ok: false, error: handleFirestoreError(err) };
   }
 }
@@ -177,7 +177,7 @@ export async function getEmergencyFromFirestore(
 
     return { ok: true, data: deserializeEmergency(docSnap.data(), docSnap.id, eventId) };
   } catch (err) {
-    console.error(`[Firestore getEmergency error] user=${userId} event=${eventId} emergency=${emergencyId}:`, err);
+    console.warn(`[Firestore getEmergency warning] user=${userId} event=${eventId} emergency=${emergencyId}:`, err);
     return { ok: false, error: handleFirestoreError(err) };
   }
 }
@@ -218,7 +218,7 @@ export async function updateEmergencyInFirestore(
     await updateDoc(emergencyRef, cleanUpdate);
     return { ok: true };
   } catch (err) {
-    console.error(`[Firestore updateEmergency error] user=${userId} event=${eventId} emergency=${emergencyId}:`, err);
+    console.warn(`[Firestore updateEmergency warning] user=${userId} event=${eventId} emergency=${emergencyId}:`, err);
     return { ok: false, error: handleFirestoreError(err) };
   }
 }
@@ -249,7 +249,7 @@ export async function deleteEmergencyInFirestore(
     await deleteDoc(emergencyRef);
     return { ok: true };
   } catch (err) {
-    console.error(`[Firestore deleteEmergency error] user=${userId} event=${eventId} emergency=${emergencyId}:`, err);
+    console.warn(`[Firestore deleteEmergency warning] user=${userId} event=${eventId} emergency=${emergencyId}:`, err);
     return { ok: false, error: handleFirestoreError(err) };
   }
 }

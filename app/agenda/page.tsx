@@ -15,6 +15,8 @@ import {
   Clock,
   AlertCircle,
   Calendar,
+  Sparkles,
+  Mic,
 } from "lucide-react";
 import { useEventStore } from "@/store/event-store";
 import { Session } from "@/types";
@@ -22,15 +24,19 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SessionFormModal } from "@/components/agenda/session-form-modal";
+import { AISpeechModal } from "@/components/live-stage/ai-speech-modal";
 import { Modal } from "@/components/ui/modal";
-import { getDateRangeArray, dateDiffDays } from "@/lib/date-utils";
+import { getDateRangeArray, dateDiffDays, formatTo12Hour } from "@/lib/date-utils";
 
 export default function AgendaPage() {
   const router = useRouter();
   const { events, activeEventId, sessions, speakers, deleteSession, reorderSessions } =
     useEventStore();
 
-  const activeEvent = events.find((e) => e.id === activeEventId);
+  const isEventEnded = (e: { status?: string; endedAt?: number | null }) =>
+    e.status === "Completed" || Boolean(e.endedAt);
+  const activeEvents = events.filter((e) => !isEventEnded(e));
+  const activeEvent = activeEvents.find((e) => e.id === activeEventId) || activeEvents[0] || null;
   const eventSessions = useMemo(() => {
     return activeEvent ? sessions.filter((s) => s.eventId === activeEvent.id) : [];
   }, [activeEvent, sessions]);
@@ -43,6 +49,8 @@ export default function AgendaPage() {
   const [sessionToDelete, setSessionToDelete] = useState<Session | null>(null);
   const [reorderError, setReorderError] = useState<string | null>(null);
   const [selectedDayFilter, setSelectedDayFilter] = useState<string>("all");
+  const [isAiSpeechModalOpen, setIsAiSpeechModalOpen] = useState(false);
+  const [aiSpeechSession, setAiSpeechSession] = useState<Session | null>(null);
 
   const eventStartDate = activeEvent?.startDate || activeEvent?.date || "";
   const eventEndDate = activeEvent?.endDate || eventStartDate;
@@ -213,20 +221,27 @@ export default function AgendaPage() {
             return (
               <div
                 key={session.id}
-                className={`p-4 rounded-xl border transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 ${
+                onClick={() => {
+                  setSessionToEdit(session);
+                  setIsModalOpen(true);
+                }}
+                className={`group p-4 rounded-xl border transition-all cursor-pointer flex flex-col md:flex-row md:items-center justify-between gap-4 ${
                   isLive
-                    ? "bg-slate-900/90 border-emerald-500/50 shadow-lg shadow-emerald-500/10 ring-1 ring-emerald-500/30"
-                    : "bg-slate-900/50 border-slate-800 hover:border-slate-700/80"
+                    ? "bg-slate-900/90 border-emerald-500/50 shadow-lg shadow-emerald-500/10 ring-1 ring-emerald-500/30 hover:border-emerald-400"
+                    : "bg-slate-900/50 border-slate-800 hover:border-blue-500/50 hover:bg-slate-900/80"
                 }`}
               >
                 {/* Left Time & Badges */}
-                <div className="flex items-start md:items-center gap-4 min-w-[220px]">
-                  <div className="flex flex-col items-start min-w-[95px]">
+                <div className="flex items-start md:items-center gap-4 min-w-[240px] select-none">
+                  <div className="flex flex-col items-start min-w-[110px]">
                     <span className="text-base font-bold text-white font-mono">
-                      {session.startTime}
+                      {formatTo12Hour(session.startTime)}
                     </span>
                     <span className="text-xs text-slate-400 font-mono">
-                      to {session.endTime}
+                      to {formatTo12Hour(session.endTime)}
+                    </span>
+                    <span className="text-[10px] text-slate-500 font-mono">
+                      {session.startTime} - {session.endTime}
                     </span>
                     {availableDates.length > 1 && (
                       <span className="text-[10px] text-blue-400 font-semibold mt-0.5">
@@ -235,7 +250,7 @@ export default function AgendaPage() {
                     )}
                     {isDelayed && (
                       <span className="text-[10px] text-amber-400 font-mono mt-0.5 line-through">
-                        Orig: {session.originalStartTime}
+                        Orig: {formatTo12Hour(session.originalStartTime)}
                       </span>
                     )}
                   </div>
@@ -256,32 +271,60 @@ export default function AgendaPage() {
 
                 {/* Center Title & Speaker */}
                 <div className="flex-1 min-w-0">
-                  <h3 className="text-base font-bold text-white truncate">{session.title}</h3>
-                  <div className="flex items-center gap-4 mt-1 text-xs text-slate-400">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-bold text-white group-hover:text-blue-300 transition-colors truncate">
+                      {session.title}
+                    </h3>
+                    <span className="opacity-0 group-hover:opacity-100 transition-opacity text-[11px] text-blue-400 flex items-center gap-1 shrink-0 font-normal select-none">
+                      <Edit2 className="w-3 h-3" /> Edit
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-4 mt-1 text-xs text-slate-400 select-none">
                     <span className="flex items-center gap-1">
                       <Clock className="w-3.5 h-3.5 text-slate-400" />
                       {session.duration} min
                     </span>
 
-                    <span className="flex items-center gap-1 truncate">
+                    <span className="flex items-center gap-1.5 truncate">
                       <User className="w-3.5 h-3.5 text-slate-400" />
                       {speaker ? (
                         <span className="text-slate-200 font-medium">
                           {speaker.name} {speaker.organization ? `(${speaker.organization})` : ""}
                         </span>
                       ) : (
-                        <span className="italic text-slate-400">No speaker assigned</span>
+                        <span className="flex items-center gap-2">
+                          <span className="italic text-rose-300 text-[11px]">No speaker assigned</span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setAiSpeechSession(session);
+                              setIsAiSpeechModalOpen(true);
+                            }}
+                            className="px-2 py-0.5 rounded-full bg-violet-500/15 border border-violet-500/30 text-violet-300 hover:bg-violet-500/25 hover:text-white text-[10px] font-semibold flex items-center gap-1 transition-all"
+                            title="Generate &amp; preview emotional AI speech for this session"
+                          >
+                            <Sparkles className="w-2.5 h-2.5 text-amber-300" />
+                            AI Stand-in Speech
+                          </button>
+                        </span>
                       )}
                     </span>
                   </div>
                 </div>
 
                 {/* Right Reorder & Actions */}
-                <div className="flex items-center justify-between md:justify-end gap-2 border-t md:border-t-0 border-slate-800/80 pt-3 md:pt-0">
+                <div
+                  className="flex items-center justify-between md:justify-end gap-2 border-t md:border-t-0 border-slate-800/80 pt-3 md:pt-0 select-none"
+                  onClick={(e) => e.stopPropagation()}
+                >
                   <div className="flex items-center gap-1">
                     <button
                       disabled={index <= 0 || isLive || session.status === "Completed" || session.isFixedTime}
-                      onClick={() => handleMove(index, "up")}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleMove(index, "up");
+                      }}
                       aria-label="Move session up"
                       className="p-1.5 text-slate-400 hover:text-white disabled:opacity-30 disabled:hover:text-slate-400 rounded-lg hover:bg-slate-800 transition-colors"
                     >
@@ -294,7 +337,10 @@ export default function AgendaPage() {
                         session.status === "Completed" ||
                         session.isFixedTime
                       }
-                      onClick={() => handleMove(index, "down")}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleMove(index, "down");
+                      }}
                       aria-label="Move session down"
                       className="p-1.5 text-slate-400 hover:text-white disabled:opacity-30 disabled:hover:text-slate-400 rounded-lg hover:bg-slate-800 transition-colors"
                     >
@@ -304,7 +350,8 @@ export default function AgendaPage() {
 
                   <div className="flex items-center gap-1 pl-2 border-l border-slate-800">
                     <button
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.stopPropagation();
                         setSessionToEdit(session);
                         setIsModalOpen(true);
                       }}
@@ -314,7 +361,10 @@ export default function AgendaPage() {
                       <Edit2 className="w-4 h-4" />
                     </button>
                     <button
-                      onClick={() => setSessionToDelete(session)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSessionToDelete(session);
+                      }}
                       aria-label="Delete session"
                       className="p-1.5 text-slate-400 hover:text-rose-400 rounded-lg hover:bg-slate-800 transition-colors"
                     >
@@ -371,6 +421,17 @@ export default function AgendaPage() {
           </div>
         </div>
       </Modal>
+
+      {/* AI Stand-in Speaker Speech with Feeling Modal */}
+      <AISpeechModal
+        isOpen={isAiSpeechModalOpen}
+        onClose={() => {
+          setIsAiSpeechModalOpen(false);
+          setAiSpeechSession(null);
+        }}
+        session={aiSpeechSession}
+        event={activeEvent || null}
+      />
     </div>
   );
 }

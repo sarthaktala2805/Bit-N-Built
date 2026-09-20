@@ -49,6 +49,18 @@ export function serializeEvent(event: Event): Record<string, unknown> {
   if (event.status !== undefined) {
     data.status = event.status;
   }
+  if (event.posterUrl !== undefined) {
+    data.posterUrl = event.posterUrl;
+  }
+  if (event.accessCode !== undefined) {
+    data.accessCode = event.accessCode;
+  }
+  if (event.resources !== undefined) {
+    data.resources = event.resources;
+  }
+  if (event.endedAt !== undefined) {
+    data.endedAt = event.endedAt;
+  }
 
   return data;
 }
@@ -74,6 +86,10 @@ export function deserializeEvent(data: DocumentData, id: string): Event {
     endDateTime: typeof data.endDateTime === "number" ? data.endDateTime : 0,
     createdAt: typeof data.createdAt === "number" ? data.createdAt : Date.now(),
     updatedAt: typeof data.updatedAt === "number" ? data.updatedAt : Date.now(),
+    posterUrl: data.posterUrl ?? null,
+    accessCode: data.accessCode || undefined,
+    resources: Array.isArray(data.resources) ? data.resources : [],
+    endedAt: typeof data.endedAt === "number" ? data.endedAt : null,
   };
 }
 
@@ -116,7 +132,7 @@ export async function createEventInFirestore(
     await setDoc(eventRef, serialized);
     return { ok: true };
   } catch (err) {
-    console.error(`[Firestore createEvent error] user=${userId} event=${event.id}:`, err);
+    console.warn(`[Firestore createEvent warning] user=${userId} event=${event.id}:`, err);
     return { ok: false, error: handleFirestoreError(err) };
   }
 }
@@ -150,7 +166,7 @@ export async function getEventsFromFirestore(
 
     return { ok: true, data: events };
   } catch (err) {
-    console.error(`[Firestore getEvents error] user=${userId}:`, err);
+    console.warn(`[Firestore getEvents warning] user=${userId}:`, err);
     return { ok: false, error: handleFirestoreError(err) };
   }
 }
@@ -182,7 +198,7 @@ export async function getEventFromFirestore(
 
     return { ok: true, data: deserializeEvent(docSnap.data(), docSnap.id) };
   } catch (err) {
-    console.error(`[Firestore getEvent error] user=${userId} event=${eventId}:`, err);
+    console.warn(`[Firestore getEvent warning] user=${userId} event=${eventId}:`, err);
     return { ok: false, error: handleFirestoreError(err) };
   }
 }
@@ -220,7 +236,7 @@ export async function updateEventInFirestore(
     await updateDoc(eventRef, cleanUpdate);
     return { ok: true };
   } catch (err) {
-    console.error(`[Firestore updateEvent error] user=${userId} event=${eventId}:`, err);
+    console.warn(`[Firestore updateEvent warning] user=${userId} event=${eventId}:`, err);
     return { ok: false, error: handleFirestoreError(err) };
   }
 }
@@ -267,7 +283,7 @@ export async function deleteEventFromFirestore(
     await batch.commit();
     return { ok: true };
   } catch (err) {
-    console.error(`[Firestore deleteEvent error] user=${userId} event=${eventId}:`, err);
+    console.warn(`[Firestore deleteEvent warning] user=${userId} event=${eventId}:`, err);
     return { ok: false, error: handleFirestoreError(err) };
   }
 }

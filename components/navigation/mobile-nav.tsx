@@ -14,6 +14,7 @@ import {
   LogOut,
   FileText,
   Mail,
+  Image as ImageIcon,
 } from "lucide-react";
 import { useEventStore } from "@/store/event-store";
 import { useAuth } from "@/contexts/auth-context";
@@ -22,11 +23,15 @@ export const MobileNav: React.FC = () => {
   const pathname = usePathname();
   const { events, activeEventId, sessions, liveEventIds } = useEventStore();
   const { logout } = useAuth();
-  const activeEvent = events.find((e) => e.id === activeEventId);
+  const isEventEnded = (e: { status?: string; endedAt?: number | null }) =>
+    e.status === "Completed" || Boolean(e.endedAt);
+  const activeEvent = events.find((e) => e.id === activeEventId && !isEventEnded(e));
   const isAnyLive = events.some((e) =>
-    e.status === "Live" ||
-    liveEventIds?.includes(e.id) ||
-    sessions.some((s) => s.eventId === e.id && s.status === "Live")
+    !isEventEnded(e) && (
+      e.status === "Live" ||
+      liveEventIds?.includes(e.id) ||
+      sessions.some((s) => s.eventId === e.id && s.status === "Live")
+    )
   );
 
   const navItems = [
@@ -37,6 +42,7 @@ export const MobileNav: React.FC = () => {
     { href: "/ai", label: "AI", icon: Sparkles },
     { href: "/scripts", label: "Scripts", icon: FileText },
     { href: "/invitations", label: "Invites", icon: Mail },
+    { href: "/image-generator", label: "Images", icon: ImageIcon },
     { href: "/analytics", label: "Stats", icon: BarChart3 },
   ];
 

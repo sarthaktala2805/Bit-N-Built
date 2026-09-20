@@ -10,6 +10,9 @@ import {
   resolveSessionTimestamps,
   formatTo12Hour,
   dateDiffDays,
+  timeToMinutes,
+  minutesToTime,
+  isValidTimeStr,
 } from "@/lib/date-utils";
 import { useEventStore } from "@/store/event-store";
 import { Calendar, Clock, User, Tag, Lock } from "lucide-react";
@@ -29,8 +32,8 @@ export const SessionFormModal: React.FC<SessionFormModalProps> = ({
 }) => {
   const { events, sessions, speakers, addSession, updateSession } = useEventStore();
   const event = events.find((e) => e.id === eventId);
-  const eventSpeakers = speakers.filter((s) => s.eventId === eventId);
-  const eventSessions = sessions.filter((s) => s.eventId === eventId);
+  const eventSpeakers = useMemo(() => speakers.filter((s) => s.eventId === eventId), [speakers, eventId]);
+  const eventSessions = useMemo(() => sessions.filter((s) => s.eventId === eventId), [sessions, eventId]);
 
   const eventStartDate = event?.startDate || event?.date || new Date().toISOString().split("T")[0];
   const eventEndDate = event?.endDate || eventStartDate;
@@ -49,6 +52,8 @@ export const SessionFormModal: React.FC<SessionFormModalProps> = ({
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
+    if (!isOpen) return;
+
     if (sessionToEdit) {
       setFormData({
         title: sessionToEdit.title,
@@ -70,18 +75,23 @@ export const SessionFormModal: React.FC<SessionFormModalProps> = ({
         nextDate = lastSession.sessionDate || eventStartDate;
       }
 
+      // Default duration: 45 minutes
+      const startMin = timeToMinutes(nextStart);
+      const endMin = (startMin + 45) % 1440;
+      const nextEnd = minutesToTime(endMin);
+
       setFormData({
         title: "",
         type: "Talk",
         speakerId: "",
         sessionDate: nextDate,
         startTime: nextStart,
-        endTime: nextStart, // default
+        endTime: nextEnd,
         isFixedTime: false,
       });
     }
     setErrors({});
-  }, [sessionToEdit, isOpen, event, eventStartDate, eventSessions]);
+  }, [isOpen, sessionToEdit]);
 
   const sessionTimestamps = useMemo(() => {
     return resolveSessionTimestamps(
@@ -93,6 +103,32 @@ export const SessionFormModal: React.FC<SessionFormModalProps> = ({
       eventStartDate
     );
   }, [formData.sessionDate, formData.startTime, formData.endTime, eventStartDate]);
+
+  const handleStartTimeChange = (newStart: string) => {
+    setFormData((prev) => {
+      if (!isValidTimeStr(newStart)) {
+        return { ...prev, startTime: newStart };
+      }
+      const prevDuration = sessionTimestamps.durationMinutes > 0 ? sessionTimestamps.durationMinutes : 45;
+      const startMin = timeToMinutes(newStart);
+      const newEnd = minutesToTime((startMin + prevDuration) % 1440);
+      return {
+        ...prev,
+        startTime: newStart,
+        endTime: newEnd,
+      };
+    });
+  };
+
+  const handleDurationPreset = (minutes: number) => {
+    if (!isValidTimeStr(formData.startTime)) return;
+    const startMin = timeToMinutes(formData.startTime);
+    const newEnd = minutesToTime((startMin + minutes) % 1440);
+    setFormData((prev) => ({
+      ...prev,
+      endTime: newEnd,
+    }));
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -152,8 +188,9 @@ export const SessionFormModal: React.FC<SessionFormModalProps> = ({
           </label>
           <input
             type="text"
+            autoFocus
             value={formData.title}
-            onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+            onChange={(e) => setFormData((prev) => ({ ...prev, title: e.target.value }))}
             placeholder="e.g. Opening & Keynote"
             className="w-full px-3 py-2 text-sm bg-slate-950 border border-slate-800 rounded-lg focus:outline-none focus:border-blue-500 text-white placeholder-slate-600"
           />
@@ -232,15 +269,20 @@ export const SessionFormModal: React.FC<SessionFormModalProps> = ({
         {/* Start & End Times */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs font-medium text-slate-300 mb-1">
-              Start Time (24h) <span className="text-rose-400">*</span>
-            </label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs font-medium text-slate-300">
+                Start Time <span className="text-rose-400">*</span>
+              </label>
+              <span className="text-[11px] font-mono text-blue-400">
+                {formatTo12Hour(formData.startTime)}
+              </span>
+            </div>
             <div className="relative">
               <input
                 type="time"
                 value={formData.startTime}
-                onChange={(e) => setFormData({ ...formData, startTime: e.target.value })}
-                className="w-full px-3 py-2 text-sm bg-slate-950 border border-slate-800 rounded-lg focus:outline-none focus:border-blue-500 text-white pl-8"
+                onChange={(e) => handleStartTimeChange(e.target.value)}
+                className="w-full px-3 py-2 text-sm bg-slate-950 border border-slate-800 rounded-lg focus:outline-none focus:border-blue-500 text-white pl-8 font-mono"
               />
               <Clock className="w-4 h-4 text-slate-500 absolute left-2.5 top-2.5 pointer-events-none" />
             </div>
@@ -248,19 +290,47 @@ export const SessionFormModal: React.FC<SessionFormModalProps> = ({
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-slate-300 mb-1">
-              End Time (24h) <span className="text-rose-400">*</span>
-            </label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs font-medium text-slate-300">
+                End Time <span className="text-rose-400">*</span>
+              </label>
+              <span className="text-[11px] font-mono text-blue-400">
+                {formatTo12Hour(formData.endTime)}
+              </span>
+            </div>
             <div className="relative">
               <input
                 type="time"
                 value={formData.endTime}
-                onChange={(e) => setFormData({ ...formData, endTime: e.target.value })}
-                className="w-full px-3 py-2 text-sm bg-slate-950 border border-slate-800 rounded-lg focus:outline-none focus:border-blue-500 text-white pl-8"
+                onChange={(e) => setFormData((prev) => ({ ...prev, endTime: e.target.value }))}
+                className="w-full px-3 py-2 text-sm bg-slate-950 border border-slate-800 rounded-lg focus:outline-none focus:border-blue-500 text-white pl-8 font-mono"
               />
               <Clock className="w-4 h-4 text-slate-500 absolute left-2.5 top-2.5 pointer-events-none" />
             </div>
             {errors.endTime && <p className="text-[11px] text-rose-400 mt-1">{errors.endTime}</p>}
+          </div>
+        </div>
+
+        {/* Quick Duration Preset Chips */}
+        <div>
+          <label className="block text-[11px] text-slate-400 mb-1.5">
+            Quick Duration Presets
+          </label>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {[15, 30, 45, 60, 90, 120].map((mins) => (
+              <button
+                type="button"
+                key={mins}
+                onClick={() => handleDurationPreset(mins)}
+                className={`px-2.5 py-1 text-xs rounded-md border font-mono transition-colors ${
+                  sessionTimestamps.durationMinutes === mins
+                    ? "bg-blue-600 border-blue-500 text-white"
+                    : "bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700 hover:text-white"
+                }`}
+              >
+                {mins}m
+              </button>
+            ))}
           </div>
         </div>
 

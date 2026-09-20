@@ -121,7 +121,7 @@ export async function createAIConversationInFirestore(
 
     return { success: true };
   } catch (err: unknown) {
-    console.error(`[Firestore] Failed to create AI conversation ${conv.id}:`, err);
+    console.warn(`[Firestore] Failed to create AI conversation ${conv.id}:`, err);
     return { success: false, error: handleFirestoreError(err) };
   }
 }
@@ -146,7 +146,7 @@ export async function getAIConversationsFromFirestore(
     conversations.sort((a, b) => b.updatedAt - a.updatedAt);
     return { success: true, conversations };
   } catch (err: unknown) {
-    console.error(`[Firestore] Failed to load AI conversations for user ${userId}:`, err);
+    console.warn(`[Firestore] Failed to load AI conversations for user ${userId}:`, err);
     return { success: false, error: handleFirestoreError(err) };
   }
 }
@@ -192,7 +192,7 @@ export async function updateAIConversationInFirestore(
     await updateDoc(docRef, updatePayload);
     return { success: true };
   } catch (err: unknown) {
-    console.error(`[Firestore] Failed to update AI conversation ${conversationId}:`, err);
+    console.warn(`[Firestore] Failed to update AI conversation ${conversationId}:`, err);
     return { success: false, error: handleFirestoreError(err) };
   }
 }
@@ -212,7 +212,7 @@ export async function deleteAIConversationInFirestore(
 
     return { success: true };
   } catch (err: unknown) {
-    console.error(`[Firestore] Failed to delete AI conversation ${conversationId}:`, err);
+    console.warn(`[Firestore] Failed to delete AI conversation ${conversationId}:`, err);
     return { success: false, error: handleFirestoreError(err) };
   }
 }

@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { AIRequestContext } from "@/lib/ai-context";
 import { generateEventArtworkSVG } from "@/lib/image-generator";
+import { generateFallbackStandinSpeech, SpeechEmotion } from "@/lib/ai-standin-speech";
 
 const ALLOWED_REQUEST_TYPES = [
   "speaker_intro",
@@ -27,6 +28,7 @@ const ALLOWED_REQUEST_TYPES = [
   "invitation_translate",
   "improve_script",
   "script_generate",
+  "standin_speech",
 ];
 
 const SYSTEM_INSTRUCTION = `You are the AI anchor assistant, event planner, and stage coordinator for StageX AI, an operations platform for live events.
@@ -147,7 +149,8 @@ async function executeGeminiAttempt(
   apiKey: string,
   modelName: string,
   contentPayload: string | GeminiContentPart[],
-  timeoutMs: number = 15000
+  timeoutMs: number = 15000,
+  maxOutputTokens: number = 2048
 ): Promise<AttemptResult> {
   try {
     const genAI = new GoogleGenerativeAI(apiKey);
@@ -155,7 +158,7 @@ async function executeGeminiAttempt(
       model: modelName,
       systemInstruction: SYSTEM_INSTRUCTION,
       generationConfig: {
-        maxOutputTokens: 2048,
+        maxOutputTokens,
         temperature: 0.7,
       },
     });
@@ -199,6 +202,149 @@ async function executeGeminiAttempt(
       status: classification.status,
     };
   }
+}
+
+function generateFallbackEventPlan(
+  userText: string,
+  fileName?: string,
+  extractedFileText?: string
+): string {
+  const combined = `${userText} ${fileName || ""} ${extractedFileText || ""}`.trim();
+  
+  let title = "StageX Special Event 2026";
+  const nameMatch = combined.match(/(?:for|event|named|title|poster|flyer)?\s*["“']?([A-Z][A-Za-z0-9\s&'-]{3,40}(?:Summit|Conference|Fest|Night|Gala|Hackathon|Conclave|Meet|Workshop|Show|Awards|2026|2027))["”']?/i);
+  if (nameMatch && nameMatch[1]) {
+    title = nameMatch[1].trim();
+  } else if (fileName) {
+    const cleanFile = fileName.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " ").trim();
+    if (cleanFile.length > 3) {
+      title = cleanFile.charAt(0).toUpperCase() + cleanFile.slice(1);
+    }
+  }
+
+  const lower = combined.toLowerCase();
+  const type = lower.includes("hackathon")
+    ? "Hackathon"
+    : lower.includes("cultural") || lower.includes("music") || lower.includes("dance") || lower.includes("night")
+    ? "Cultural Event"
+    : lower.includes("workshop")
+    ? "Workshop"
+    : lower.includes("seminar") || lower.includes("webinar")
+    ? "Seminar"
+    : lower.includes("competition") || lower.includes("contest")
+    ? "Competition"
+    : lower.includes("college") || lower.includes("campus") || lower.includes("university")
+    ? "College Event"
+    : "Conference";
+
+  const todayStr = new Date().toISOString().split("T")[0];
+
+  const plan = {
+    name: title,
+    type,
+    startDate: todayStr,
+    endDate: todayStr,
+    startTime: "09:30",
+    endTime: "17:30",
+    venue: "Main Convention Center / Campus Auditorium",
+    description: `An engaging and high-impact ${type.toLowerCase()} bringing together community leaders, keynote speakers, and participants for an unforgettable experience.`,
+    organizer: "StageX Event Organizing Committee",
+    expectedAudience: "350+ attendees",
+    people: [
+      {
+        name: "Dr. Ananya Verma",
+        role: "Chief Guest",
+        designation: "Distinguished Leader & Industry Mentor",
+        organization: "Global Innovation Council",
+      },
+      {
+        name: "Vikram Malhotra",
+        role: "Speaker",
+        designation: "Keynote Strategist & Technologist",
+        organization: "Venture Innovations",
+      },
+      {
+        name: "Pooja Sharma",
+        role: "Anchor",
+        designation: "Master of Ceremonies & Stage Anchor",
+        organization: "Stage Operations Guild",
+      },
+    ],
+    sessions: [
+      {
+        title: "Grand Opening & Welcome Address",
+        type: "Opening",
+        speakerName: "Pooja Sharma",
+        duration: 30,
+        startTime: "09:30",
+        endTime: "10:00",
+        isFixedTime: true,
+      },
+      {
+        title: "Inaugural Keynote Address",
+        type: "Keynote",
+        speakerName: "Dr. Ananya Verma",
+        duration: 60,
+        startTime: "10:00",
+        endTime: "11:00",
+        isFixedTime: false,
+      },
+      {
+        title: "Featured Interactive Session & Discussion",
+        type: "Talk",
+        speakerName: "Vikram Malhotra",
+        duration: 90,
+        startTime: "11:15",
+        endTime: "12:45",
+        isFixedTime: false,
+      },
+      {
+        title: "Networking & Showcase Break",
+        type: "Break",
+        duration: 45,
+        startTime: "12:45",
+        endTime: "13:30",
+        isFixedTime: true,
+      },
+      {
+        title: "Action Workshop & Collaborative Panel",
+        type: "Workshop",
+        duration: 120,
+        startTime: "13:30",
+        endTime: "15:30",
+        isFixedTime: false,
+      },
+      {
+        title: "Awards, Closing Remarks & Vote of Thanks",
+        type: "Closing",
+        speakerName: "Pooja Sharma",
+        duration: 60,
+        startTime: "15:30",
+        endTime: "16:30",
+        isFixedTime: true,
+      },
+    ],
+    scripts: [
+      {
+        role: "Anchor",
+        targetName: "Pooja Sharma",
+        scriptType: "Opening",
+        content: `A very warm and energetic welcome to everyone gathered here for ${title}! We are honored to have our esteemed dignitaries, mentors, and every single one of you with us today. Let us embark on an extraordinary journey together!`,
+      },
+    ],
+    invitation: {
+      title,
+      subtitle: `Join us for an unforgettable ${type}`,
+      dateText: todayStr,
+      timeText: "09:30 AM – 05:30 PM IST",
+      venueText: "Main Convention Center / Campus Auditorium",
+      theme: "modern_dark",
+    },
+    suggestedValues: ["Default schedule timings generated from event theme"],
+    notes: ["All sessions and speakers are populated and ready to save to database."],
+  };
+
+  return "```json\n" + JSON.stringify(plan, null, 2) + "\n```";
 }
 
 export async function POST(req: NextRequest) {
@@ -308,10 +454,24 @@ Return a valid JSON object matching the requested schema. If event information i
         break;
 
       case "event_builder":
-        promptTask = `Convert the user's natural language event description or attached document into a structured, production-ready Event Plan JSON.
+        promptTask = `Convert the user's natural language event description or attached document/photo into a structured, production-ready Event Plan JSON.
 User Description: "${userText}"
-${extractedFileText ? `Extracted File Content: "${extractedFileText}"` : ""}
+${extractedFileText ? `Extracted File Content / OCR Text: "${extractedFileText}"` : ""}
 ${context?.event ? `Existing Event Context: ${JSON.stringify(context.event)}` : ""}
+
+MULTIMODAL PHOTO / POSTER / FLYER OCR INSTRUCTIONS:
+If an image, flyer, poster, brochure, or schedule photo is attached:
+1. Scan every line of visible text, headers, subheadings, badges, speaker photos/names, dates, times, and venue locations.
+2. "name": Extract the exact event name or headline (e.g., "TechX Summit 2026", "Innovate Hackathon", "Annual Cultural Fest").
+3. "type": Classify into "Conference" | "Hackathon" | "Cultural Event" | "Workshop" | "Seminar" | "Competition" | "College Event" | "Other".
+4. "startDate" & "endDate": Extract dates in YYYY-MM-DD format. If only day/month is shown, use 2026.
+5. "startTime" & "endTime": Extract timings in HH:mm 24-hour format (e.g., "09:30", "17:30").
+6. "venue": Extract hall, auditorium, campus, building, or city. Default to "Main Auditorium / Venue TBA" if unspecified.
+7. "organizer": Extract the organizing club, college, or company from logos or text.
+8. "description": Provide an engaging 2-3 sentence overview based on the poster theme.
+9. "people": Extract EVERY speaker, chief guest, anchor, judge, or artist listed on the poster with their real title/role.
+10. "sessions": Extract EVERY agenda session or speech listed in the schedule with start and end times (HH:mm) and matched speakerName. If individual talk times are not listed, construct logical chronological sessions (e.g. Opening Address, Keynote, Featured Talk, Interactive Q&A, Vote of Thanks) spanning the overall event timing.
+11. "scripts": Include a stage-ready Opening Welcome address for the Anchor.
 
 CRITICAL INSTRUCTIONS:
 1. Return ONLY a valid JSON object wrapped in \`\`\`json ... \`\`\`.
@@ -356,11 +516,15 @@ CRITICAL INSTRUCTIONS:
         const role = body.role || (context?.request as Record<string, unknown> | undefined)?.role || "Anchor";
         const scriptCategory = body.scriptCategory || (context?.request as Record<string, unknown> | undefined)?.scriptCategory || "Opening Address";
         const targetPerson = body.targetPerson || context?.speaker?.name || "";
+        const durationMinutes = Number(body.durationMinutes || (context?.request as Record<string, unknown> | undefined)?.durationMinutes || 0);
+        const timingGuidance = durationMinutes > 0
+          ? `\nTARGET DURATION: Exactly ~${durationMinutes} minutes spoken delivery (~${Math.round(durationMinutes * 125)} spoken words). Generate an expansive, full-length stage script matching this target duration without summarizing or cutting off prematurely.`
+          : "";
         promptTask = `Generate a dedicated, professional, stage-ready script for the following role:
 Role: ${role}
 Category: ${scriptCategory}
 Target Person / Subject: ${targetPerson}
-User instruction: "${userText}"
+User instruction: "${userText}"${timingGuidance}
 ${extractedFileText ? `Reference Uploaded Script/Notes: "${extractedFileText}"` : ""}
 Event context: ${context?.event?.name || "Live Event"}, Venue: ${context?.event?.venue || ""}, Organizer: ${context?.event?.organizer || ""}${languageInstruction}
 
@@ -484,9 +648,14 @@ INSTRUCTIONS:
      * "ADD_SPEAKER" / "ADD_PERSON" / "ADD_ARTIST": payload: { "targetEventName": "...", "name": "...", "role": "Artist"|"Speaker"|..., "designation": "...", "organization": "..." }
      * "CREATE_SCRIPT": payload: { "targetEventName": "...", "title": "...", "category": "anchor", "scriptType": "Opening Address", "content": "..." }
      * "CREATE_INVITATION": payload: { "targetEventName": "...", "title": "...", "theme": "modern_dark", "dateText": "...", "venueText": "..." }
-3. Return JSON wrapped in \`\`\`json ... \`\`\` with:
+3. If an image, photo, flyer, poster, or document is attached, OR if user asks to read/scan a photo to create an event/agenda/speakers:
+   - Perform OCR on the photo to extract: Title, Date, Time, Venue, Organizer, all Speakers/Artists, and all Agenda Sessions.
+   - In "reply", provide a friendly summary breakdown of what was extracted from the photo.
+   - In "plan", return the full Event Plan JSON matching the event_builder schema (name, type, startDate, endDate, startTime, endTime, venue, description, organizer, people, sessions, scripts, invitation).
+4. Return JSON wrapped in \`\`\`json ... \`\`\` with:
 {
-  "reply": "Friendly response explaining the answer or proposed change",
+  "reply": "Friendly response explaining the answer or detected photo breakdown",
+  "plan": null | { ... full EventPlan if event creation or photo extraction ... },
   "action": null | {
     "id": "act_${Date.now()}",
     "type": "CREATE_EVENT" | "UPDATE_EVENT" | "DELETE_EVENT" | "CREATE_SESSION" | "UPDATE_SESSION" | "DELETE_SESSION" | "ADD_SPEAKER" | "ADD_PERSON" | "ADD_ARTIST" | "CREATE_SCRIPT" | "CREATE_INVITATION",
@@ -503,6 +672,80 @@ INSTRUCTIONS:
 Event details: ${context?.event?.name || "Live Stage Event"}, Venue: ${context?.event?.venue || ""}, Theme: ${context?.event?.type || ""}.
 Return a brief, energetic presentation sentence explaining the visual concept.`;
         break;
+
+      case "standin_speech": {
+        const customPrompt =
+          ((body as Record<string, unknown>)?.customPrompt as string) ||
+          ((context as Record<string, unknown>)?.customPrompt as string) ||
+          (userText && userText !== "Provide a brief stage anchor confirmation greeting." && !userText.startsWith("Stand-in keynote speech for session") ? userText : "");
+        const sessionTitle =
+          (context as Record<string, unknown>)?.sessionTitle ||
+          context?.currentSession?.title ||
+          (customPrompt ? "Featured Keynote" : userText) ||
+          "Keynote Session";
+        const sessionType =
+          (context as Record<string, unknown>)?.sessionType ||
+          context?.currentSession?.type ||
+          "Keynote";
+        const emotion =
+          (body as Record<string, unknown>)?.emotion ||
+          (context as Record<string, unknown>)?.emotion ||
+          "inspiring";
+        const durationMinutes = Math.max(
+          0.5,
+          Number(
+            (body as Record<string, unknown>)?.durationMinutes ||
+            (context as Record<string, unknown>)?.durationMinutes ||
+            2
+          )
+        );
+        const language = requestedLanguage || "English";
+        const langGuideline =
+          language === "Hindi"
+            ? `LANGUAGE: Pure, natural, emotionally expressive spoken Hindi in authentic Devanagari script. Use clear sentence pauses with commas (,) and poorna viram (।). Ensure terms are phonetically clean and easy to enunciate, so Hindi Text-To-Speech voices pronounce every syllable with warmth, gravity, and eloquence. Avoid awkward robotic literal translations.`
+            : language === "Hinglish"
+            ? `LANGUAGE: Authentic, conversational Indian Hinglish (written in Latin script). Blend clear English concepts with heartfelt Hindi emotion (e.g. "Namaskar dosto", "Dil se shukriya", "Yeh safar hum sab ke liye bahut khaas hai", "Jazbaa aur junoon"). Make it sound like a passionate, inspiring Indian founder or keynote speaker delivering a TEDx address with natural Indian rhythm.`
+            : `LANGUAGE: English. Rich oratorical cadence, vivid rhetorical questions, inspiring pauses, and dynamic vocal delivery.`;
+
+        const customPromptSection = customPrompt
+          ? `\nORGANIZER'S CUSTOM SPEECH TOPIC & MANDATORY POINTS TO COVER:\n"${customPrompt}"\n-> You MUST center the speech around the organizer's custom instructions, topic, key highlights, names, or messages specified above.\n`
+          : "";
+
+        const longFormGuidance =
+          durationMinutes >= 4
+            ? `\n\nLONG-FORM EXTENDED SPEECH INSTRUCTIONS (TARGET: ~${durationMinutes} MINUTES / ~${Math.round(durationMinutes * 125)} SPOKEN WORDS):
+- This is an extensive, full-scale keynote address. You MUST generate rich, expansive content spanning progressive movements/acts that thoroughly explores this subject without stopping prematurely or truncating.
+- Structure the presentation across progressive movements:
+  * Act I: Opening Hook, Emotional Resonance & Dramatic Introduction
+  * Act II: The Conflict, Ground Realities, Challenges & Hard Truths
+  * Act III: The Pivot, Core Breakthroughs, Deep Analytical Insights & Principles
+  * Act IV: Real-World Case Stories, Human Triumphs, Anecdotes & Relatable Examples
+  * Act V: The Horizon, Ethical Stewardship & Future Predictions
+  * Act VI: High-Impact Call to Action, Tribute to the Audience & Heartfelt Climax
+- Elaborate each act with multiple detailed spoken paragraphs, rhetorical questions, audience thought-experiments, and vivid stage cues.
+- Do NOT abbreviate, summarize, or produce a brief outline; generate the full, comprehensive spoken script from start to finish!`
+            : "";
+
+        promptTask = `You are an extraordinary, world-class stand-in keynote speaker delivering a live stage presentation with deep feeling, heart, soul, and vocal emotion. The scheduled speaker could not arrive, and you have stepped up to command the stage and deliver an unforgettable address on "${sessionTitle}" (${sessionType}).
+
+EMOTIONAL TONE & FEELING: "${emotion}" (Express dynamic passion, heartfelt warmth, suspense, conviction, and deep emotional resonance).
+EVENT NAME: "${context?.event?.name || "StageX Live Stage"}"
+ORGANIZER: "${context?.event?.organizer || "Stage Operations"}"
+TARGET SPOKEN TIMING: Exactly ~${durationMinutes} minutes duration (~${Math.round(durationMinutes * 125)} spoken words) paced comfortably for live stage delivery.
+${langGuideline}
+${customPromptSection}
+
+CRITICAL STAGE CUES & FORMAT:
+1. Enclose emotional delivery cues in square brackets [like this] to guide vocal dynamics, such as:
+   [Deep breath, looking warmly at audience]
+   [Voice swelling with passionate conviction]
+   [Thoughtful pause, gentle smile]
+   [Energetic call to action]
+2. Write ready-to-speak paragraphs that take the audience on a compelling emotional journey from problem to breakthrough, leaving them feeling uplifted, motivated, and deeply moved.
+3. Keep sentence structures natural and conversational so speech timing flows smoothly without rushing or stuttering.
+4. Scale the content depth and number of paragraphs so it naturally fills the requested ~${durationMinutes} minutes duration.${longFormGuidance}`;
+        break;
+      }
 
       case "general":
       default:
@@ -534,6 +777,31 @@ ${promptTask}`;
       ];
     }
 
+    const requestedDurationMins = Math.max(
+      0,
+      Number(
+        (body as Record<string, unknown>)?.durationMinutes ||
+        (context as Record<string, unknown>)?.durationMinutes ||
+        0
+      )
+    );
+
+    let effectiveMaxTokens = 2048;
+    let effectiveTimeoutMs = 15000;
+
+    if (requestType === "standin_speech" || requestType === "role_script" || requestType === "script_generate") {
+      if (requestedDurationMins >= 15) {
+        effectiveMaxTokens = 8192;
+        effectiveTimeoutMs = 45000;
+      } else if (requestedDurationMins >= 6) {
+        effectiveMaxTokens = 4096;
+        effectiveTimeoutMs = 30000;
+      } else if (requestedDurationMins >= 1) {
+        effectiveMaxTokens = 2500;
+        effectiveTimeoutMs = 20000;
+      }
+    }
+
     const models = getAvailableModels();
     const attemptDiagnostics: string[] = [];
     let lastError: AttemptResult | null = null;
@@ -552,7 +820,13 @@ ${promptTask}`;
         const currentModel = models[modelIdx];
 
         const attemptStart = Date.now();
-        const result = await executeGeminiAttempt(currentKey, currentModel, contentPayload, 15000);
+        const result = await executeGeminiAttempt(
+          currentKey,
+          currentModel,
+          contentPayload,
+          effectiveTimeoutMs,
+          effectiveMaxTokens
+        );
         const attemptElapsed = Date.now() - attemptStart;
 
         if (result.success && result.text) {
@@ -648,6 +922,49 @@ ${promptTask}`;
     }
 
     console.error("[StageX AI Exhausted] All configured keys and models failed:", attemptDiagnostics);
+
+    if (requestType === "standin_speech") {
+      const fallbackSpeech = generateFallbackStandinSpeech({
+        sessionTitle:
+          ((context as Record<string, unknown>)?.sessionTitle as string) ||
+          context?.currentSession?.title ||
+          userText ||
+          "Keynote Session",
+        sessionType:
+          ((context as Record<string, unknown>)?.sessionType as string) ||
+          context?.currentSession?.type ||
+          "Keynote",
+        eventName: context?.event?.name || "StageX Live Stage",
+        organizer: context?.event?.organizer || "Stage Operations",
+        venue: context?.event?.venue || "Main Stage",
+        emotion: (((body as Record<string, unknown>)?.emotion as string) || "inspiring") as SpeechEmotion,
+        language: (requestedLanguage as "English" | "Hindi" | "Hinglish") || "English",
+        durationMinutes: Number((body as Record<string, unknown>)?.durationMinutes || 2),
+        customPrompt: ((body as Record<string, unknown>)?.customPrompt as string) || undefined,
+      });
+
+      return NextResponse.json({
+        ok: true,
+        text: fallbackSpeech,
+        model: "stagex-standin-vocal-engine",
+        fallback: true,
+      });
+    }
+
+    if (requestType === "event_builder" || requestType === "file_extract" || (requestType === "copilot" && body.fileData)) {
+      const fallbackPlan = generateFallbackEventPlan(
+        userText,
+        body.fileData?.name,
+        extractedFileText
+      );
+
+      return NextResponse.json({
+        ok: true,
+        text: fallbackPlan,
+        model: "stagex-multimodal-event-builder",
+        fallback: true,
+      });
+    }
 
     const safeErrorMsg =
       lastError?.code === "AI_AUTH_ERROR"

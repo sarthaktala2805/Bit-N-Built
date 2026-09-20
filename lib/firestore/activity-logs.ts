@@ -99,7 +99,7 @@ export async function createActivityLogInFirestore(
     await setDoc(logRef, serialized);
     return { ok: true };
   } catch (err) {
-    console.error(`[Firestore createActivityLog error] user=${userId} event=${eventId} log=${activityLog.id}:`, err);
+    console.warn(`[Firestore createActivityLog warning] user=${userId} event=${eventId} log=${activityLog.id}:`, err);
     return { ok: false, error: handleFirestoreError(err) };
   }
 }
@@ -136,7 +136,7 @@ export async function batchCreateActivityLogsInFirestore(
     await batch.commit();
     return { ok: true };
   } catch (err) {
-    console.error(`[Firestore batchCreateActivityLogs error] user=${userId} event=${eventId}:`, err);
+    console.warn(`[Firestore batchCreateActivityLogs warning] user=${userId} event=${eventId}:`, err);
     return { ok: false, error: handleFirestoreError(err) };
   }
 }
@@ -174,7 +174,7 @@ export async function getActivityLogsFromFirestore(
 
     return { ok: true, data: logs };
   } catch (err) {
-    console.error(`[Firestore getActivityLogs error] user=${userId} event=${eventId}:`, err);
+    console.warn(`[Firestore getActivityLogs warning] user=${userId} event=${eventId}:`, err);
     return { ok: false, error: handleFirestoreError(err) };
   }
 }
@@ -210,7 +210,7 @@ export async function getActivityLogFromFirestore(
 
     return { ok: true, data: deserializeActivityLog(docSnap.data(), docSnap.id, eventId) };
   } catch (err) {
-    console.error(`[Firestore getActivityLog error] user=${userId} event=${eventId} log=${logId}:`, err);
+    console.warn(`[Firestore getActivityLog warning] user=${userId} event=${eventId} log=${logId}:`, err);
     return { ok: false, error: handleFirestoreError(err) };
   }
 }
@@ -241,7 +241,7 @@ export async function deleteActivityLogInFirestore(
     await deleteDoc(logRef);
     return { ok: true };
   } catch (err) {
-    console.error(`[Firestore deleteActivityLog error] user=${userId} event=${eventId} log=${logId}:`, err);
+    console.warn(`[Firestore deleteActivityLog warning] user=${userId} event=${eventId} log=${logId}:`, err);
     return { ok: false, error: handleFirestoreError(err) };
   }
 }

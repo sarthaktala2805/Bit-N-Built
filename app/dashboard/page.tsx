@@ -29,7 +29,9 @@ export default function DashboardPage() {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [activityFilter, setActivityFilter] = useState<string>("all");
 
-  const activeEvent = events.find((e) => e.id === activeEventId);
+  const isEventEnded = (e: { status?: string; endedAt?: number | null }) => e.status === "Completed" || Boolean(e.endedAt);
+  const activeEvents = events.filter((e) => !isEventEnded(e));
+  const activeEvent = activeEvents.find((e) => e.id === activeEventId) || activeEvents[0] || null;
   const eventSessions = activeEvent ? sessions.filter((s) => s.eventId === activeEvent.id) : [];
   const eventSpeakers = activeEvent ? speakers.filter((s) => s.eventId === activeEvent.id) : [];
   const eventLogs = activeEvent
@@ -54,8 +56,8 @@ export default function DashboardPage() {
 
   const activeEventStatus = getDerivedEventStatus();
 
-  // All events currently live
-  const liveEvents = events.filter((ev) =>
+  // All active events currently live
+  const liveEvents = activeEvents.filter((ev) =>
     ev.status === "Live" ||
     (liveEventIds && liveEventIds.includes(ev.id)) ||
     sessions.some((s) => s.eventId === ev.id && s.status === "Live")
@@ -63,7 +65,7 @@ export default function DashboardPage() {
 
   // Upcoming events
   const todayStr = new Date().toISOString().split("T")[0];
-  const upcomingEventsCount = events.filter((e) => e.date >= todayStr).length;
+  const upcomingEventsCount = activeEvents.filter((e) => e.date >= todayStr).length;
 
   const filteredLogs = eventLogs.filter((log) => {
     if (activityFilter === "all") return true;
@@ -97,13 +99,13 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {events.length === 0 ? (
+      {activeEvents.length === 0 ? (
         <EmptyState
           showLogo={true}
-          title="No events yet. Create your first event."
-          description="StageX AI empowers anchors and organizers with real-time countdowns, automatic schedule adaptation for delays, and context-aware script assistance."
-          actionLabel="Create First Event"
-          onAction={() => setIsCreateModalOpen(true)}
+          title={events.length > 0 ? "No active events. All completed events are in Past Events." : "No events yet. Create your first event."}
+          description={events.length > 0 ? "All previous events have concluded and are archived in the Past Events section." : "StageX AI empowers anchors and organizers with real-time countdowns, automatic schedule adaptation for delays, and context-aware script assistance."}
+          actionLabel={events.length > 0 ? "View Past Events" : "Create First Event"}
+          onAction={() => events.length > 0 ? router.push("/events") : setIsCreateModalOpen(true)}
         />
       ) : (
         <>
@@ -204,10 +206,10 @@ export default function DashboardPage() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800/80 hover:border-slate-700/80 transition-all">
               <div className="flex items-center justify-between text-slate-400 mb-2">
-                <span className="text-xs font-medium">Total Events</span>
+                <span className="text-xs font-medium">Active Events</span>
                 <Calendar className="w-4 h-4 text-blue-400" />
               </div>
-              <div className="text-2xl font-bold text-white">{events.length}</div>
+              <div className="text-2xl font-bold text-white">{activeEvents.length}</div>
               <p className="text-[11px] text-slate-400 mt-1">{upcomingEventsCount} scheduled soon</p>
             </div>
 

@@ -109,7 +109,7 @@ export async function createSpeakerInFirestore(
     await setDoc(speakerRef, serialized);
     return { ok: true };
   } catch (err) {
-    console.error(`[Firestore createSpeaker error] user=${userId} event=${eventId} speaker=${speaker.id}:`, err);
+    console.warn(`[Firestore createSpeaker warning] user=${userId} event=${eventId} speaker=${speaker.id}:`, err);
     return { ok: false, error: handleFirestoreError(err) };
   }
 }
@@ -147,7 +147,7 @@ export async function getSpeakersFromFirestore(
 
     return { ok: true, data: speakers };
   } catch (err) {
-    console.error(`[Firestore getSpeakers error] user=${userId} event=${eventId}:`, err);
+    console.warn(`[Firestore getSpeakers warning] user=${userId} event=${eventId}:`, err);
     return { ok: false, error: handleFirestoreError(err) };
   }
 }
@@ -183,7 +183,7 @@ export async function getSpeakerFromFirestore(
 
     return { ok: true, data: deserializeSpeaker(docSnap.data(), docSnap.id, eventId) };
   } catch (err) {
-    console.error(`[Firestore getSpeaker error] user=${userId} event=${eventId} speaker=${speakerId}:`, err);
+    console.warn(`[Firestore getSpeaker warning] user=${userId} event=${eventId} speaker=${speakerId}:`, err);
     return { ok: false, error: handleFirestoreError(err) };
   }
 }
@@ -224,7 +224,7 @@ export async function updateSpeakerInFirestore(
     await updateDoc(speakerRef, cleanUpdate);
     return { ok: true };
   } catch (err) {
-    console.error(`[Firestore updateSpeaker error] user=${userId} event=${eventId} speaker=${speakerId}:`, err);
+    console.warn(`[Firestore updateSpeaker warning] user=${userId} event=${eventId} speaker=${speakerId}:`, err);
     return { ok: false, error: handleFirestoreError(err) };
   }
 }
@@ -255,7 +255,7 @@ export async function deleteSpeakerInFirestore(
     await deleteDoc(speakerRef);
     return { ok: true };
   } catch (err) {
-    console.error(`[Firestore deleteSpeaker error] user=${userId} event=${eventId} speaker=${speakerId}:`, err);
+    console.warn(`[Firestore deleteSpeaker warning] user=${userId} event=${eventId} speaker=${speakerId}:`, err);
     return { ok: false, error: handleFirestoreError(err) };
   }
 }

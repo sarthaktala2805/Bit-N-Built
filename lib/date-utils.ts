@@ -270,15 +270,15 @@ export function resolveSessionTimestamps(
   const startM = timeToMinutes(startTime);
   const endM = timeToMinutes(endTime);
 
-  if (endM <= startM) {
-    // Session itself spans midnight!
+  if (endM < startM) {
+    // Session itself spans midnight into the next day (e.g. 23:30 -> 00:30)
     const nextDate = addDaysToDateStr(sessionDate, 1);
     endDateTime = parseDateTimeToMs(nextDate, endTime);
   } else {
     endDateTime = parseDateTimeToMs(sessionDate, endTime);
   }
 
-  const durationMinutes = Math.max(1, Math.round((endDateTime - startDateTime) / 60000));
+  const durationMinutes = Math.max(0, Math.round((endDateTime - startDateTime) / 60000));
 
   return {
     sessionDate,

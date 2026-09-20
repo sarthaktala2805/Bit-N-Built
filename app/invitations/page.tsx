@@ -52,7 +52,12 @@ export default function InvitationsPage() {
     deleteInvitation,
   } = useEventStore();
 
-  const [selectedEventId, setSelectedEventId] = useState<string>(activeEventId || events[0]?.id || "");
+  const isEventEnded = (e: { status?: string; endedAt?: number | null }) =>
+    e.status === "Completed" || Boolean(e.endedAt);
+  const activeEvents = useMemo(() => events.filter((e) => !isEventEnded(e)), [events]);
+  const [selectedEventId, setSelectedEventId] = useState<string>(
+    activeEvents.find((e) => e.id === activeEventId)?.id || activeEvents[0]?.id || ""
+  );
   const [activeInvitationId, setActiveInvitationId] = useState<string | null>(null);
   const [selectedLanguage, setSelectedLanguage] = useState<string>("English");
   const [isGenerating, setIsGenerating] = useState(false);
@@ -68,8 +73,8 @@ export default function InvitationsPage() {
 
   // Selected Event
   const currentEvent = useMemo(
-    () => events.find((e) => e.id === selectedEventId) || null,
-    [events, selectedEventId]
+    () => activeEvents.find((e) => e.id === selectedEventId) || null,
+    [activeEvents, selectedEventId]
   );
 
   const eventSpeakers = useMemo(
@@ -298,20 +303,47 @@ export default function InvitationsPage() {
     }
   };
 
-  const handleGenerateArtworkOnly = () => {
+  const handleGenerateArtworkOnly = async () => {
     if (!currentEvent) return;
     setIsGeneratingArtwork(true);
     try {
       const theme = activeInvitation?.theme || "modern_dark";
-      const artworkUrl = generateEventArtworkSVG({
-        title: activeInvitation?.title || currentEvent.name,
-        subtitle: activeInvitation?.data?.subtitle || currentEvent.description,
-        theme,
-        eventType: currentEvent.type,
-        organizer: currentEvent.organizer,
-        venue: currentEvent.venue,
-        dateText: currentEvent.startDate || currentEvent.date,
-      });
+      const prompt = `Cinematic 8K luxury invitation poster for ${activeInvitation?.title || currentEvent.name}, ${currentEvent.type} event at ${currentEvent.venue || "grand hall"}. Dramatic stage lighting, elegant atmosphere, photorealistic 8k render.`;
+      const hfToken = typeof window !== "undefined" ? localStorage.getItem("stagex_hf_token") || undefined : undefined;
+
+      let artworkUrl: string = "";
+      try {
+        const res = await fetch("/api/generate-image", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            prompt,
+            title: activeInvitation?.title || currentEvent.name,
+            type: currentEvent.type,
+            eventName: currentEvent.name,
+            hfToken,
+            fallback: !hfToken,
+          }),
+        });
+        const data = await res.json();
+        if (data.ok && data.imageUrl) {
+          artworkUrl = data.imageUrl;
+        }
+      } catch {
+        // Fallback to SVG
+      }
+
+      if (!artworkUrl) {
+        artworkUrl = generateEventArtworkSVG({
+          title: activeInvitation?.title || currentEvent.name,
+          subtitle: activeInvitation?.data?.subtitle || currentEvent.description,
+          theme,
+          eventType: currentEvent.type,
+          organizer: currentEvent.organizer,
+          venue: currentEvent.venue,
+          dateText: currentEvent.startDate || currentEvent.date,
+        });
+      }
 
       if (activeInvitation) {
         updateInvitation(activeInvitation.id, {
@@ -468,10 +500,10 @@ export default function InvitationsPage() {
                 onChange={(e) => handleEventChange(e.target.value)}
                 className="appearance-none bg-slate-900 border border-slate-700/80 rounded-xl px-4 py-2 pr-10 text-xs font-semibold text-slate-200 hover:border-slate-600 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/40 cursor-pointer shadow-sm transition-all"
               >
-                {events.length === 0 ? (
-                  <option value="">No events available</option>
+                {activeEvents.length === 0 ? (
+                  <option value="">No active events available</option>
                 ) : (
-                  events.map((e) => (
+                  activeEvents.map((e) => (
                     <option key={e.id} value={e.id}>
                       {e.name}
                     </option>

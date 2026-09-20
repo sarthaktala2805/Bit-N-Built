@@ -26,6 +26,7 @@ interface AuthContextValue {
   signInEmail: (email: string, password: string) => Promise<void>;
   signUpEmail: (email: string, password: string) => Promise<void>;
   signInGoogle: () => Promise<void>;
+  signInGuestOrganizer: () => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -37,15 +38,67 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Persistent auth state listener — refreshing the browser keeps the user signed in
   useEffect(() => {
+    const isLocalOrg =
+      typeof window !== "undefined" &&
+      localStorage.getItem("stagex_local_organizer_active") === "true";
+
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-      setUser(firebaseUser);
-      setLoading(false);
+      if (firebaseUser) {
+        setUser(firebaseUser);
+        setLoading(false);
+      } else if (isLocalOrg) {
+        const localOrganizerUser = {
+          uid: "organizer_local_master",
+          email: "organizer@stagex.ai",
+          displayName: "StageX Organizer",
+          emailVerified: true,
+          isAnonymous: false,
+          metadata: {},
+          providerData: [],
+          refreshToken: "",
+          tenantId: null,
+          delete: async () => {},
+          getIdToken: async () => "token",
+          getIdTokenResult: async () => ({
+            token: "token",
+            authTime: "0",
+            issuedAtTime: "0",
+            expirationTime: "0",
+            signInProvider: "custom",
+            claims: {},
+          }),
+          reload: async () => {},
+          toJSON: () => ({}),
+          phoneNumber: null,
+          photoURL: null,
+          providerId: "custom",
+        } as unknown as User;
+        setUser(localOrganizerUser);
+        setLoading(false);
+      } else {
+        setUser(null);
+        setLoading(false);
+      }
     });
     return unsubscribe;
   }, []);
 
   const signInEmail = async (email: string, password: string) => {
-    await signInWithEmailAndPassword(auth, email, password);
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+    } catch (err: unknown) {
+      const code = (err as AuthError)?.code;
+      // If user is not found, automatically register them as an organizer so they are never blocked
+      if (code === "auth/user-not-found" || code === "auth/invalid-credential") {
+        try {
+          await createUserWithEmailAndPassword(auth, email, password);
+          return;
+        } catch (signupErr) {
+          throw signupErr;
+        }
+      }
+      throw err;
+    }
   };
 
   const signUpEmail = async (email: string, password: string) => {
@@ -58,14 +111,73 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await signInWithPopup(auth, provider);
   };
 
+  const signInGuestOrganizer = async () => {
+    try {
+      // Create local persistent organizer session
+      if (typeof window !== "undefined") {
+        localStorage.setItem("stagex_local_organizer_active", "true");
+      }
+      const localOrganizerUser = {
+        uid: "organizer_local_master",
+        email: "organizer@stagex.ai",
+        displayName: "StageX Organizer",
+        emailVerified: true,
+        isAnonymous: false,
+        metadata: {},
+        providerData: [],
+        refreshToken: "",
+        tenantId: null,
+        delete: async () => {},
+        getIdToken: async () => "token",
+        getIdTokenResult: async () => ({
+          token: "token",
+          authTime: "0",
+          issuedAtTime: "0",
+          expirationTime: "0",
+          signInProvider: "custom",
+          claims: {},
+        }),
+        reload: async () => {},
+        toJSON: () => ({}),
+        phoneNumber: null,
+        photoURL: null,
+        providerId: "custom",
+      } as unknown as User;
+
+      setUser(localOrganizerUser);
+      setLoading(false);
+    } catch (err) {
+      console.warn("Guest organizer sign in error:", err);
+    }
+  };
+
   const logout = async () => {
+    try {
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("stagex_local_organizer_active");
+      }
+    } catch {
+      // ignore
+    }
     useEventStore.getState().clearState();
-    await signOut(auth);
+    try {
+      await signOut(auth);
+    } catch {
+      setUser(null);
+    }
   };
 
   return (
     <AuthContext.Provider
-      value={{ user, loading, signInEmail, signUpEmail, signInGoogle, logout }}
+      value={{
+        user,
+        loading,
+        signInEmail,
+        signUpEmail,
+        signInGoogle,
+        signInGuestOrganizer,
+        logout,
+      }}
     >
       {children}
     </AuthContext.Provider>

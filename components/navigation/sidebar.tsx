@@ -17,6 +17,7 @@ import {
   LogOut,
   FileText,
   Mail,
+  Image as ImageIcon,
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { useEventStore } from "@/store/event-store";
@@ -26,11 +27,15 @@ export const Sidebar: React.FC = () => {
   const { events, activeEventId, sessions, liveEventIds } = useEventStore();
   const { user, logout } = useAuth();
 
-  const activeEvent = events.find((e) => e.id === activeEventId);
+  const isEventEnded = (e: { status?: string; endedAt?: number | null }) =>
+    e.status === "Completed" || Boolean(e.endedAt);
+  const activeEvent = events.find((e) => e.id === activeEventId && !isEventEnded(e));
   const liveCount = events.filter((e) =>
-    e.status === "Live" ||
-    liveEventIds?.includes(e.id) ||
-    sessions.some((s) => s.eventId === e.id && s.status === "Live")
+    !isEventEnded(e) && (
+      e.status === "Live" ||
+      liveEventIds?.includes(e.id) ||
+      sessions.some((s) => s.eventId === e.id && s.status === "Live")
+    )
   ).length;
 
   const navItems = [
@@ -47,6 +52,7 @@ export const Sidebar: React.FC = () => {
     { href: "/ai", label: "AI Copilot", icon: Sparkles },
     { href: "/scripts", label: "Scripts", icon: FileText },
     { href: "/invitations", label: "Invitations", icon: Mail },
+    { href: "/image-generator", label: "Image Generator", icon: ImageIcon, badge: "Free" },
     { href: "/analytics", label: "Analytics", icon: BarChart3 },
     { href: "/settings", label: "Settings", icon: Settings },
   ];

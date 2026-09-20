@@ -46,6 +46,7 @@ export function serializeSession(session: Session): Record<string, unknown> {
     originalEndDateTime: session.originalEndDateTime,
     actualStartTime: session.actualStartTime ?? null,
     actualEndTime: session.actualEndTime ?? null,
+    imageUrl: session.imageUrl ?? null,
   };
 
   return data;
@@ -80,6 +81,7 @@ export function deserializeSession(data: DocumentData, id: string, defaultEventI
     originalEndDateTime: typeof data.originalEndDateTime === "number" ? data.originalEndDateTime : (data.endDateTime || 0),
     actualStartTime: typeof data.actualStartTime === "number" ? data.actualStartTime : null,
     actualEndTime: typeof data.actualEndTime === "number" ? data.actualEndTime : null,
+    imageUrl: data.imageUrl ?? null,
   };
 }
 
@@ -129,7 +131,7 @@ export async function createSessionInFirestore(
     await setDoc(sessionRef, serialized);
     return { ok: true };
   } catch (err) {
-    console.error(`[Firestore createSession error] user=${userId} event=${eventId} session=${session.id}:`, err);
+    console.warn(`[Firestore createSession warning] user=${userId} event=${eventId} session=${session.id}:`, err);
     return { ok: false, error: handleFirestoreError(err) };
   }
 }
@@ -167,7 +169,7 @@ export async function getSessionsFromFirestore(
 
     return { ok: true, data: sessions };
   } catch (err) {
-    console.error(`[Firestore getSessions error] user=${userId} event=${eventId}:`, err);
+    console.warn(`[Firestore getSessions warning] user=${userId} event=${eventId}:`, err);
     return { ok: false, error: handleFirestoreError(err) };
   }
 }
@@ -203,7 +205,7 @@ export async function getSessionFromFirestore(
 
     return { ok: true, data: deserializeSession(docSnap.data(), docSnap.id, eventId) };
   } catch (err) {
-    console.error(`[Firestore getSession error] user=${userId} event=${eventId} session=${sessionId}:`, err);
+    console.warn(`[Firestore getSession warning] user=${userId} event=${eventId} session=${sessionId}:`, err);
     return { ok: false, error: handleFirestoreError(err) };
   }
 }
@@ -244,7 +246,7 @@ export async function updateSessionInFirestore(
     await updateDoc(sessionRef, cleanUpdate);
     return { ok: true };
   } catch (err) {
-    console.error(`[Firestore updateSession error] user=${userId} event=${eventId} session=${sessionId}:`, err);
+    console.warn(`[Firestore updateSession warning] user=${userId} event=${eventId} session=${sessionId}:`, err);
     return { ok: false, error: handleFirestoreError(err) };
   }
 }
@@ -275,7 +277,7 @@ export async function deleteSessionInFirestore(
     await deleteDoc(sessionRef);
     return { ok: true };
   } catch (err) {
-    console.error(`[Firestore deleteSession error] user=${userId} event=${eventId} session=${sessionId}:`, err);
+    console.warn(`[Firestore deleteSession warning] user=${userId} event=${eventId} session=${sessionId}:`, err);
     return { ok: false, error: handleFirestoreError(err) };
   }
 }
@@ -319,7 +321,7 @@ export async function batchUpdateSessionsInFirestore(
     await batch.commit();
     return { ok: true };
   } catch (err) {
-    console.error(`[Firestore batchUpdateSessions error] user=${userId} event=${eventId}:`, err);
+    console.warn(`[Firestore batchUpdateSessions warning] user=${userId} event=${eventId}:`, err);
     return { ok: false, error: handleFirestoreError(err) };
   }
 }

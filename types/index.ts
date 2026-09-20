@@ -13,6 +13,22 @@ export type EventType =
 
 export type EventStatus = "Scheduled" | "Live" | "Completed" | "Cancelled";
 
+export type EventResourceType = "video" | "ppt" | "script" | "document";
+
+export interface EventResource {
+  id: string;
+  type: EventResourceType;
+  title: string;
+  url: string; // URL link, embed link, or file key / data URL
+  description?: string;
+  uploadedAt: number; // epoch ms
+  author?: string;
+  isLocalFile?: boolean;
+  fileName?: string;
+  fileSize?: number;
+  fileMimeType?: string;
+}
+
 export interface Event {
   id: string;
   name: string;
@@ -30,6 +46,10 @@ export interface Event {
   endDateTime: number;   // epoch ms
   createdAt: number; // epoch ms
   updatedAt: number; // epoch ms
+  posterUrl?: string | null; // Event banner / poster artwork URL
+  accessCode?: string; // 6-character alphanumeric code for audience access (e.g. ST8X9B)
+  resources?: EventResource[]; // Past meeting resources (video, ppt, script)
+  endedAt?: number | null; // epoch ms when meeting ended
 }
 
 export interface Speaker {
@@ -85,6 +105,7 @@ export interface Session {
   originalEndDateTime: number;   // epoch ms
   actualStartTime: number | null;
   actualEndTime: number | null;
+  imageUrl?: string | null;
 }
 
 export interface DelayRecord {
@@ -307,6 +328,9 @@ export type ActivityLogType =
   | "event_updated"
   | "event_live_started"
   | "event_live_stopped"
+  | "event_archived"
+  | "resource_added"
+  | "resource_deleted"
   | "speaker_added"
   | "speaker_updated"
   | "speaker_deleted"
@@ -439,6 +463,7 @@ export interface AIMessage {
   createdAt: number;
   attachments?: AttachmentItem[];
   plan?: EventPlan;
+  createdEventId?: string;
   action?: AIAction;
   eventChoices?: EventChoice[];
   pendingActionPrompt?: string;

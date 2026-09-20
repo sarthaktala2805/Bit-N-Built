@@ -101,7 +101,7 @@ export async function createAIRecordInFirestore(
     await setDoc(recordRef, serialized);
     return { ok: true };
   } catch (err) {
-    console.error(`[Firestore createAIRecord error] user=${userId} event=${eventId} record=${aiRecord.id}:`, err);
+    console.warn(`[Firestore createAIRecord warning] user=${userId} event=${eventId} record=${aiRecord.id}:`, err);
     return { ok: false, error: handleFirestoreError(err) };
   }
 }
@@ -139,7 +139,7 @@ export async function getAIRecordsFromFirestore(
 
     return { ok: true, data: records };
   } catch (err) {
-    console.error(`[Firestore getAIRecords error] user=${userId} event=${eventId}:`, err);
+    console.warn(`[Firestore getAIRecords warning] user=${userId} event=${eventId}:`, err);
     return { ok: false, error: handleFirestoreError(err) };
   }
 }
@@ -175,7 +175,7 @@ export async function getAIRecordFromFirestore(
 
     return { ok: true, data: deserializeAIRecord(docSnap.data(), docSnap.id, eventId) };
   } catch (err) {
-    console.error(`[Firestore getAIRecord error] user=${userId} event=${eventId} record=${aiRecordId}:`, err);
+    console.warn(`[Firestore getAIRecord warning] user=${userId} event=${eventId} record=${aiRecordId}:`, err);
     return { ok: false, error: handleFirestoreError(err) };
   }
 }
@@ -216,7 +216,7 @@ export async function updateAIRecordInFirestore(
     await updateDoc(recordRef, cleanUpdate);
     return { ok: true };
   } catch (err) {
-    console.error(`[Firestore updateAIRecord error] user=${userId} event=${eventId} record=${aiRecordId}:`, err);
+    console.warn(`[Firestore updateAIRecord warning] user=${userId} event=${eventId} record=${aiRecordId}:`, err);
     return { ok: false, error: handleFirestoreError(err) };
   }
 }
@@ -247,7 +247,7 @@ export async function deleteAIRecordInFirestore(
     await deleteDoc(recordRef);
     return { ok: true };
   } catch (err) {
-    console.error(`[Firestore deleteAIRecord error] user=${userId} event=${eventId} record=${aiRecordId}:`, err);
+    console.warn(`[Firestore deleteAIRecord warning] user=${userId} event=${eventId} record=${aiRecordId}:`, err);
     return { ok: false, error: handleFirestoreError(err) };
   }
 }

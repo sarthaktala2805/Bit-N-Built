@@ -99,7 +99,7 @@ export async function createDelayInFirestore(
     await setDoc(delayRef, serialized);
     return { ok: true };
   } catch (err) {
-    console.error(`[Firestore createDelay error] user=${userId} event=${eventId} delay=${delay.id}:`, err);
+    console.warn(`[Firestore createDelay warning] user=${userId} event=${eventId} delay=${delay.id}:`, err);
     return { ok: false, error: handleFirestoreError(err) };
   }
 }
@@ -137,7 +137,7 @@ export async function getDelaysFromFirestore(
 
     return { ok: true, data: delays };
   } catch (err) {
-    console.error(`[Firestore getDelays error] user=${userId} event=${eventId}:`, err);
+    console.warn(`[Firestore getDelays warning] user=${userId} event=${eventId}:`, err);
     return { ok: false, error: handleFirestoreError(err) };
   }
 }
@@ -173,7 +173,7 @@ export async function getDelayFromFirestore(
 
     return { ok: true, data: deserializeDelay(docSnap.data(), docSnap.id, eventId) };
   } catch (err) {
-    console.error(`[Firestore getDelay error] user=${userId} event=${eventId} delay=${delayId}:`, err);
+    console.warn(`[Firestore getDelay warning] user=${userId} event=${eventId} delay=${delayId}:`, err);
     return { ok: false, error: handleFirestoreError(err) };
   }
 }
@@ -214,7 +214,7 @@ export async function updateDelayInFirestore(
     await updateDoc(delayRef, cleanUpdate);
     return { ok: true };
   } catch (err) {
-    console.error(`[Firestore updateDelay error] user=${userId} event=${eventId} delay=${delayId}:`, err);
+    console.warn(`[Firestore updateDelay warning] user=${userId} event=${eventId} delay=${delayId}:`, err);
     return { ok: false, error: handleFirestoreError(err) };
   }
 }
@@ -245,7 +245,7 @@ export async function deleteDelayInFirestore(
     await deleteDoc(delayRef);
     return { ok: true };
   } catch (err) {
-    console.error(`[Firestore deleteDelay error] user=${userId} event=${eventId} delay=${delayId}:`, err);
+    console.warn(`[Firestore deleteDelay warning] user=${userId} event=${eventId} delay=${delayId}:`, err);
     return { ok: false, error: handleFirestoreError(err) };
   }
 }

@@ -18,6 +18,8 @@ import {
   ShieldAlert,
   Check,
   Square,
+  UserX,
+  Mic,
 } from "lucide-react";
 import { useEventStore } from "@/store/event-store";
 import { calculateLiveState, formatTimer } from "@/lib/live-engine";
@@ -27,6 +29,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { DelayModal } from "@/components/live-stage/delay-modal";
 import { EmergencyDialog } from "@/components/live-stage/emergency-dialog";
 import { AnnouncementModal } from "@/components/live-stage/announcement-modal";
+import { AISpeechModal } from "@/components/live-stage/ai-speech-modal";
 import { TeleprompterView } from "@/components/teleprompter/teleprompter-view";
 import { EmergencyType, Session } from "@/types";
 import { dateDiffDays } from "@/lib/date-utils";
@@ -67,10 +70,15 @@ export default function LiveStagePage() {
     }
   }, [requestedEventId, activeEventId, selectedEventId]);
 
+  const isEventEnded = (e: { status?: string; endedAt?: number | null }) => e.status === "Completed" || Boolean(e.endedAt);
+  const activeEvents = events.filter((e) => !isEventEnded(e));
+  const requestedEvent = requestedEventId ? events.find((e) => e.id === requestedEventId) : null;
+  const isRequestedEventEnded = requestedEvent ? isEventEnded(requestedEvent) : false;
+
   const activeEvent =
-    events.find((e) => e.id === selectedEventId) ||
-    events.find((e) => e.id === activeEventId) ||
-    events[0] ||
+    activeEvents.find((e) => e.id === selectedEventId) ||
+    activeEvents.find((e) => e.id === activeEventId) ||
+    activeEvents[0] ||
     null;
 
   const eventSessions = activeEvent ? sessions.filter((s) => s.eventId === activeEvent.id) : [];
@@ -98,6 +106,8 @@ export default function LiveStagePage() {
   const [isEmergencyModalOpen, setIsEmergencyModalOpen] = useState(false);
   const [isAnnouncementModalOpen, setIsAnnouncementModalOpen] = useState(false);
   const [isTeleprompterOpen, setIsTeleprompterOpen] = useState(false);
+  const [isAiSpeechModalOpen, setIsAiSpeechModalOpen] = useState(false);
+  const [aiSpeechSession, setAiSpeechSession] = useState<Session | null>(null);
   const [teleprompterContent, setTeleprompterContent] = useState<string>("");
   const [teleprompterTitle, setTeleprompterTitle] = useState<string>("Stage Script");
   const [actionError, setActionError] = useState<string | null>(null);
@@ -164,6 +174,18 @@ export default function LiveStagePage() {
     }
   };
 
+  if (requestedEvent && isRequestedEventEnded) {
+    return (
+      <EmptyState
+        title="Event has Concluded & Archived"
+        description={`The event "${requestedEvent.name}" has already ended and was moved to the Past Events Archive. It cannot be reopened on Live Stage.`}
+        actionLabel="Go to Past Events"
+        onAction={() => router.push("/events")}
+        icon={<Radio className="w-8 h-8 text-amber-400" />}
+      />
+    );
+  }
+
   if (!activeEvent) {
     return (
       <EmptyState
@@ -191,7 +213,7 @@ export default function LiveStagePage() {
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
       {/* Multi-Live Event Switcher Bar */}
-      {events.length > 1 && (
+      {activeEvents.length > 1 && (
         <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3 shadow-lg">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2 text-xs font-semibold text-slate-300">
@@ -204,7 +226,7 @@ export default function LiveStagePage() {
           </div>
 
           <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin">
-            {events.map((ev) => {
+            {activeEvents.map((ev) => {
               const isThisLive = isEventLive(ev.id);
               const isSelected = activeEvent?.id === ev.id;
               const hasEmergencies = emergencies.some(
@@ -410,30 +432,70 @@ export default function LiveStagePage() {
                 </h2>
 
                 {currentSpeaker ? (
-                  <div className="flex items-center gap-3 text-sm text-slate-300">
-                    <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 overflow-hidden shrink-0 flex items-center justify-center">
-                      {currentSpeaker.image ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={currentSpeaker.image}
-                          alt={currentSpeaker.name}
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <User className="w-4 h-4 text-slate-400" />
-                      )}
+                  <div className="flex items-center justify-between flex-wrap gap-3">
+                    <div className="flex items-center gap-3 text-sm text-slate-300">
+                      <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 overflow-hidden shrink-0 flex items-center justify-center">
+                        {currentSpeaker.image ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={currentSpeaker.image}
+                            alt={currentSpeaker.name}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <User className="w-4 h-4 text-slate-400" />
+                        )}
+                      </div>
+                      <div>
+                        <span className="font-semibold text-white">{currentSpeaker.name}</span>
+                        {currentSpeaker.designation && (
+                          <span className="text-slate-400 text-xs ml-1.5">
+                            ({currentSpeaker.designation})
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <div>
-                      <span className="font-semibold text-white">{currentSpeaker.name}</span>
-                      {currentSpeaker.designation && (
-                        <span className="text-slate-400 text-xs ml-1.5">
-                          ({currentSpeaker.designation})
-                        </span>
-                      )}
-                    </div>
+
+                    <Button
+                      onClick={() => {
+                        setAiSpeechSession(currentSession);
+                        setIsAiSpeechModalOpen(true);
+                      }}
+                      variant="outline"
+                      size="sm"
+                      className="text-xs bg-slate-950/60 border-violet-800/60 text-violet-300 hover:bg-violet-900/40"
+                      title="If speaker is absent or delayed, AI can deliver this speech"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 mr-1 text-violet-400" />
+                      AI Stand-in Speech
+                    </Button>
                   </div>
                 ) : (
-                  <p className="text-xs text-slate-400 italic">No speaker assigned.</p>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-xl bg-violet-950/30 border border-violet-700/50 shadow-inner">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-full bg-rose-500/20 border border-rose-500/40 flex items-center justify-center shrink-0">
+                        <UserX className="w-4 h-4 text-rose-300" />
+                      </div>
+                      <div>
+                        <p className="text-xs font-bold text-rose-300">No Speaker Assigned</p>
+                        <p className="text-[11px] text-slate-300">
+                          AI will deliver the speech live with emotion, stage cues &amp; authentic feeling!
+                        </p>
+                      </div>
+                    </div>
+
+                    <Button
+                      onClick={() => {
+                        setAiSpeechSession(currentSession);
+                        setIsAiSpeechModalOpen(true);
+                      }}
+                      size="sm"
+                      className="bg-gradient-to-r from-violet-600 via-indigo-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 text-white font-bold text-xs shadow-lg shadow-indigo-500/25 shrink-0"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 mr-1.5 text-amber-300" />
+                      Deliver AI Speech with Feeling
+                    </Button>
+                  </div>
                 )}
               </div>
 
@@ -498,6 +560,20 @@ export default function LiveStagePage() {
                   <FastForward className="w-4 h-4 mr-1.5" />
                   Skip Session
                 </Button>
+
+                <Button
+                  onClick={() => {
+                    setAiSpeechSession(currentSession);
+                    setIsAiSpeechModalOpen(true);
+                  }}
+                  variant="secondary"
+                  size="md"
+                  className="bg-violet-950/60 border-violet-700/60 text-violet-200 hover:bg-violet-900/60 shadow-sm ml-auto"
+                  title="Deliver speech with feeling via AI Stand-in Speaker"
+                >
+                  <Sparkles className="w-4 h-4 mr-1.5 text-amber-300" />
+                  AI Stand-in Speech
+                </Button>
               </div>
             </div>
           ) : (
@@ -556,7 +632,7 @@ export default function LiveStagePage() {
                   </p>
                 </div>
 
-                {nextSpeaker && (
+                {nextSpeaker ? (
                   <div className="flex items-center gap-2.5 p-2.5 rounded-xl bg-slate-950/40 border border-slate-800/60 text-xs text-slate-300">
                     <User className="w-4 h-4 text-indigo-400 shrink-0" />
                     <div className="truncate">
@@ -565,6 +641,22 @@ export default function LiveStagePage() {
                         <p className="text-[11px] text-slate-400 truncate">{nextSpeaker.designation}</p>
                       )}
                     </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between p-2.5 rounded-xl bg-violet-950/30 border border-violet-800/40 text-xs">
+                    <div className="flex items-center gap-2 text-violet-300">
+                      <UserX className="w-4 h-4 text-rose-400 shrink-0" />
+                      <span>No speaker assigned</span>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setAiSpeechSession(nextSession);
+                        setIsAiSpeechModalOpen(true);
+                      }}
+                      className="text-[11px] font-bold text-indigo-300 hover:text-white underline flex items-center gap-1"
+                    >
+                      <Sparkles className="w-3 h-3 text-amber-400" /> Pre-generate Speech
+                    </button>
                   </div>
                 )}
 
@@ -752,6 +844,20 @@ export default function LiveStagePage() {
         onClose={() => setIsAnnouncementModalOpen(false)}
         eventId={activeEvent?.id}
         onOpenInTeleprompter={(text) => handleOpenTeleprompter(text, "Live Announcement")}
+      />
+
+      {/* AI Stand-in Speaker Speech with Feeling Modal */}
+      <AISpeechModal
+        isOpen={isAiSpeechModalOpen}
+        onClose={() => {
+          setIsAiSpeechModalOpen(false);
+          setAiSpeechSession(null);
+        }}
+        session={aiSpeechSession}
+        event={activeEvent}
+        onOpenInTeleprompter={(text) => {
+          setIsTeleprompterOpen(true);
+        }}
       />
 
       {/* Teleprompter View */}
