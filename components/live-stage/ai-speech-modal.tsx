@@ -415,18 +415,18 @@ export const AISpeechModal: React.FC<AISpeechModalProps> = ({
       category: "speaker",
       scriptType: "Keynote Stand-in Address",
       content: scriptText,
-      targetPerson: "AI Stand-in Speaker",
-      deliveryNotes: `Emotion: ${selectedEmotion} | Language: ${selectedLanguage} | Speed: ${rate}x | Duration: ${formatSpeechTime(
-        estimatedDurationSecs
-      )}`,
+      targetName: "AI Stand-in Speaker",
+      language: selectedLanguage,
     });
 
     // Also add to event resources
     addEventResource(event.id, {
-      name: `AI Stand-in Speech: ${session.title}`,
+      title: `AI Stand-in Speech: ${session.title}`,
       type: "script",
-      size: `${scriptText.length} chars`,
-      data: scriptText,
+      url: `data:text/plain;charset=utf-8,${encodeURIComponent(scriptText)}`,
+      description: `Emotion: ${selectedEmotion} | Language: ${selectedLanguage} | Speed: ${rate}x | Duration: ${formatSpeechTime(
+        estimatedDurationSecs
+      )}`,
     });
 
     setHasSaved(true);
@@ -438,7 +438,7 @@ export const AISpeechModal: React.FC<AISpeechModalProps> = ({
   const activeEmotionConfig = SPEECH_EMOTIONS.find((e) => e.id === selectedEmotion);
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} size="2xl" title="">
+    <Modal isOpen={isOpen} onClose={onClose} maxWidth="2xl" title="">
       <div className="space-y-4 -mt-2">
         {/* Header with Live Stand-in Badge */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">

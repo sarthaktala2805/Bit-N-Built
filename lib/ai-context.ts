@@ -71,6 +71,7 @@ export interface AIRequestContext {
     tone?: "Formal" | "Energetic" | "Warm" | "Humorous";
     length?: "Short" | "Medium" | "Long";
     userText?: string;
+    durationMinutes?: number;
   };
 }
 
@@ -86,6 +87,7 @@ export function buildAIContext(params: {
   tone?: "Formal" | "Energetic" | "Warm" | "Humorous";
   length?: "Short" | "Medium" | "Long";
   userText?: string;
+  durationMinutes?: number;
   now?: number;
 }): { context: AIRequestContext | null; error?: string } {
   const {
@@ -100,6 +102,7 @@ export function buildAIContext(params: {
     tone = "Warm",
     length = "Medium",
     userText,
+    durationMinutes,
     now = Date.now(),
   } = params;
 
@@ -180,6 +183,7 @@ export function buildAIContext(params: {
       tone,
       length,
       userText,
+      durationMinutes,
     },
   };
 

@@ -347,6 +347,63 @@ function generateFallbackEventPlan(
   return "```json\n" + JSON.stringify(plan, null, 2) + "\n```";
 }
 
+export interface AIRequestBody {
+  requestType?: string;
+  type?: string;
+  prompt?: string;
+  role?: string;
+  scriptCategory?: string;
+  targetPerson?: string;
+  language?: string;
+  extractedText?: string;
+  durationMinutes?: number;
+  customPrompt?: string;
+  emotion?: string;
+  fileData?: {
+    mimeType: string;
+    data: string;
+    name?: string;
+  };
+  context?: AIRequestContext & {
+    conversationHistory?: { role: string; content: string }[];
+    [key: string]: unknown;
+  };
+}
+
+/**
+ * Safely parse and validate durationMinutes:
+ * - Accepts finite positive numbers
+ * - Safely handles string numeric values if the frontend sends them
+ * - Safely handles missing/null/undefined values via fallbacks
+ * - Invalid/negative values resolve safely to 0 or the specified default
+ */
+function validateDurationMinutes(
+  value: unknown,
+  fallbackValue?: unknown,
+  defaultValue = 0
+): number {
+  const resolve = (val: unknown): number | null => {
+    if (typeof val === "number") {
+      return Number.isFinite(val) && val > 0 ? val : null;
+    }
+    if (typeof val === "string") {
+      const trimmed = val.trim();
+      if (!trimmed) return null;
+      const parsed = Number(trimmed);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+    }
+    return null;
+  };
+
+  const primary = resolve(value);
+  if (primary !== null) return primary;
+
+  const fallback = resolve(fallbackValue);
+  if (fallback !== null) return fallback;
+
+  return defaultValue;
+}
+
 export async function POST(req: NextRequest) {
   const requestStartTime = Date.now();
   try {
@@ -380,25 +437,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    let body: {
-      requestType?: string;
-      type?: string;
-      prompt?: string;
-      role?: string;
-      scriptCategory?: string;
-      targetPerson?: string;
-      language?: string;
-      extractedText?: string;
-      fileData?: {
-        mimeType: string;
-        data: string;
-        name?: string;
-      };
-      context?: AIRequestContext & {
-        conversationHistory?: { role: string; content: string }[];
-        [key: string]: unknown;
-      };
-    };
+    let body: AIRequestBody;
 
     try {
       body = JSON.parse(rawBody);
@@ -516,7 +555,11 @@ CRITICAL INSTRUCTIONS:
         const role = body.role || (context?.request as Record<string, unknown> | undefined)?.role || "Anchor";
         const scriptCategory = body.scriptCategory || (context?.request as Record<string, unknown> | undefined)?.scriptCategory || "Opening Address";
         const targetPerson = body.targetPerson || context?.speaker?.name || "";
-        const durationMinutes = Number(body.durationMinutes || (context?.request as Record<string, unknown> | undefined)?.durationMinutes || 0);
+        const durationMinutes = validateDurationMinutes(
+          body.durationMinutes,
+          (context?.request as Record<string, unknown> | undefined)?.durationMinutes,
+          0
+        );
         const timingGuidance = durationMinutes > 0
           ? `\nTARGET DURATION: Exactly ~${durationMinutes} minutes spoken delivery (~${Math.round(durationMinutes * 125)} spoken words). Generate an expansive, full-length stage script matching this target duration without summarizing or cutting off prematurely.`
           : "";
