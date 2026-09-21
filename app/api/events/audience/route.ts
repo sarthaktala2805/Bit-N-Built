@@ -38,13 +38,30 @@ export async function GET(request: NextRequest) {
     }
 
     // 1. Primary lookup: publicEvents/{cleanCode}
-    let docRef = doc(targetDb, "publicEvents", cleanCode);
-    let snapshot = await getDoc(docRef);
-
-    // 2. Legacy fallback: public_events/{cleanCode}
-    if (!snapshot.exists()) {
-      docRef = doc(targetDb, "public_events", cleanCode);
+    let snapshot;
+    try {
+      let docRef = doc(targetDb, "publicEvents", cleanCode);
       snapshot = await getDoc(docRef);
+
+      // 2. Legacy fallback: public_events/{cleanCode}
+      if (!snapshot.exists()) {
+        docRef = doc(targetDb, "public_events", cleanCode);
+        snapshot = await getDoc(docRef);
+      }
+    } catch (fbErr: unknown) {
+      console.error("[API Audience Firestore Lookup Error]:", fbErr);
+      const errMsg = (fbErr as Error)?.message || "Database query failed";
+      const isPermission = errMsg.toLowerCase().includes("permission") || (fbErr as { code?: string })?.code?.includes("permission");
+      return NextResponse.json(
+        {
+          ok: false,
+          error: isPermission
+            ? "Firestore permission denied. Please ensure Firestore Security Rules allow public read on publicEvents/{eventCode} in Firebase Console."
+            : `Failed to query event code: ${errMsg}`,
+          details: errMsg,
+        },
+        { status: isPermission ? 403 : 500 }
+      );
     }
 
     if (!snapshot.exists()) {

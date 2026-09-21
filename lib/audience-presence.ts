@@ -1,15 +1,16 @@
 // StageX AI — Real-time Audience Presence & Active Attendee Counter
-// Tracks active attendee sessions under publicEvents/{eventCode}/presence/{sessionId}
-// Guarantees real, non-fabricated attendee metrics across devices, accounts, and networks.
+// Implements secure server-side HMAC session ownership, anti-inflation controls,
+// and privacy-preserving aggregate counting (no individual attendee session metadata exposed).
 
 import * as fb from "@/lib/firebase";
-import { doc, collection, setDoc, onSnapshot, query } from "firebase/firestore";
-import { normalizeEventCode, validateEventCode } from "./event-code";
+import { doc, setDoc } from "firebase/firestore";
+import { validateEventCode } from "./event-code";
 import { PUBLIC_COLLECTION } from "./events-registry";
 
-const SESSION_STORAGE_KEY = "stagex_presence_session_id";
+const SESSION_TOKEN_KEY = "stagex_presence_session_token";
+const SESSION_ID_KEY = "stagex_presence_session_id";
 const HEARTBEAT_INTERVAL_MS = 20000; // 20 seconds
-const STALE_TIMEOUT_MS = 60000; // 60 seconds
+const COUNT_POLL_INTERVAL_MS = 10000; // 10 seconds
 
 function getActiveDb() {
   try {
@@ -26,29 +27,22 @@ function getActiveDb() {
   return null;
 }
 
-/**
- * Retrieves or creates a persistent session identifier for the current browser tab/session
- */
-export function getOrCreatePresenceSessionId(): string {
-  if (typeof window === "undefined") {
-    return "sess_" + Math.random().toString(36).substring(2, 9);
-  }
-
+function getActiveAuthUid(): string | null {
   try {
-    let existing = window.sessionStorage.getItem(SESSION_STORAGE_KEY);
-    if (!existing) {
-      existing = "aud_" + (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 11));
-      window.sessionStorage.setItem(SESSION_STORAGE_KEY, existing);
-    }
-    return existing;
+    const authInstance =
+      typeof (fb as unknown as Record<string, unknown>).getFirebaseAuth === "function"
+        ? ((fb as unknown as Record<string, unknown>).getFirebaseAuth as () => { currentUser?: { uid?: string } })()
+        : ((fb as unknown as Record<string, unknown>).auth as { currentUser?: { uid?: string } } | undefined);
+    return authInstance?.currentUser?.uid || null;
   } catch {
-    return "aud_" + Math.random().toString(36).substring(2, 11);
+    return null;
   }
 }
 
 /**
- * Starts audience presence session for a given event code.
- * Periodically heartbeats lastSeenAt and marks session left on exit.
+ * Starts an audience presence session for a given event code.
+ * Uses secure server-side HMAC signed token to prove session ownership
+ * and prevent anonymous session hijacking or artificial count inflation.
  * Returns cleanup function to be called on unmount.
  */
 export function startAudiencePresence(
@@ -59,64 +53,132 @@ export function startAudiencePresence(
   if (!val.valid) return () => {};
 
   const eventCode = val.code;
-  const sessionId = getOrCreatePresenceSessionId();
-  const effectiveUid = userUid || "anonymous";
+  const currentAuthUid = getActiveAuthUid();
+  const effectiveUid = userUid || currentAuthUid || "anonymous";
 
-  const targetDb = getActiveDb();
-  if (!targetDb) return () => {};
+  let currentSessionId: string | null = null;
+  let currentSessionToken: string | null = null;
+  let isMounted = true;
 
-  const presenceDocRef = doc(
-    targetDb as never,
-    PUBLIC_COLLECTION,
-    eventCode,
-    "presence",
-    sessionId
-  );
+  // 1. Join presence session via secure server-side API
+  if (typeof window !== "undefined") {
+    fetch("/api/events/presence", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "join",
+        eventCode,
+        userUid: effectiveUid,
+      }),
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!isMounted || !data || !data.ok) return;
+        currentSessionId = data.sessionId;
+        currentSessionToken = data.sessionToken;
+        try {
+          window.sessionStorage.setItem(SESSION_ID_KEY, data.sessionId);
+          window.sessionStorage.setItem(SESSION_TOKEN_KEY, data.sessionToken);
+        } catch {
+          // ignore
+        }
+      })
+      .catch((err) => {
+        console.warn("[Presence Join API Warning]:", err);
+      });
+  }
 
-  const now = Date.now();
-
-  // Initial join record
-  setDoc(
-    presenceDocRef,
-    {
-      sessionId,
-      eventCode,
-      userUid: effectiveUid,
-      joinedAt: now,
-      lastSeenAt: now,
-      status: "active",
-      leftAt: null,
-    },
-    { merge: true }
-  ).catch((err) => {
-    console.warn(`[Audience Presence Join Warning]:`, err);
-  });
-
-  // Periodic heartbeat
-  const intervalId = setInterval(() => {
-    setDoc(
-      presenceDocRef,
-      {
-        lastSeenAt: Date.now(),
-        status: "active",
-      },
-      { merge: true }
-    ).catch(() => {});
-  }, HEARTBEAT_INTERVAL_MS);
-
-  // Leave handler
-  const markLeft = () => {
-    try {
+  // 2. If user is authenticated, also sync to Firestore rules boundary
+  // Under hardened firestore.rules: authenticated user can ONLY create their own doc where sessionId == auth.uid
+  if (currentAuthUid) {
+    const targetDb = getActiveDb();
+    if (targetDb) {
+      const now = Date.now();
+      const authDocRef = doc(targetDb as never, PUBLIC_COLLECTION, eventCode, "presence", currentAuthUid);
       setDoc(
-        presenceDocRef,
+        authDocRef,
         {
-          status: "left",
-          leftAt: Date.now(),
+          sessionId: currentAuthUid,
+          eventCode,
+          userUid: currentAuthUid,
+          joinedAt: now,
+          lastSeenAt: now,
+          status: "active",
         },
         { merge: true }
       ).catch(() => {});
-    } catch {
-      // ignore
+    }
+  }
+
+  // 3. Periodic heartbeat (every 20s)
+  const heartbeatInterval = setInterval(() => {
+    if (!currentSessionToken || !currentSessionId) return;
+
+    if (typeof window !== "undefined") {
+      fetch("/api/events/presence", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "heartbeat",
+          eventCode,
+          sessionId: currentSessionId,
+          sessionToken: currentSessionToken,
+        }),
+      }).catch(() => {});
+    }
+
+    if (currentAuthUid) {
+      const targetDb = getActiveDb();
+      if (targetDb) {
+        const authDocRef = doc(targetDb as never, PUBLIC_COLLECTION, eventCode, "presence", currentAuthUid);
+        setDoc(
+          authDocRef,
+          {
+            lastSeenAt: Date.now(),
+            status: "active",
+          },
+          { merge: true }
+        ).catch(() => {});
+      }
+    }
+  }, HEARTBEAT_INTERVAL_MS);
+
+  // 4. Leave handler (on unmount or page exit)
+  const markLeft = () => {
+    if (!currentSessionToken || !currentSessionId) return;
+
+    const payload = JSON.stringify({
+      action: "leave",
+      eventCode,
+      sessionId: currentSessionId,
+      sessionToken: currentSessionToken,
+    });
+
+    if (typeof navigator !== "undefined" && typeof navigator.sendBeacon === "function") {
+      const blob = new Blob([payload], { type: "application/json" });
+      navigator.sendBeacon("/api/events/presence", blob);
+    } else if (typeof window !== "undefined") {
+      fetch("/api/events/presence", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: payload,
+        keepalive: true,
+      }).catch(() => {});
+    }
+
+    if (currentAuthUid) {
+      const targetDb = getActiveDb();
+      if (targetDb) {
+        const authDocRef = doc(targetDb as never, PUBLIC_COLLECTION, eventCode, "presence", currentAuthUid);
+        setDoc(
+          authDocRef,
+          {
+            status: "left",
+            leftAt: Date.now(),
+          },
+          { merge: true }
+        ).catch(() => {});
+      }
     }
   };
 
@@ -127,7 +189,8 @@ export function startAudiencePresence(
 
   // Cleanup on unmount
   return () => {
-    clearInterval(intervalId);
+    isMounted = false;
+    clearInterval(heartbeatInterval);
     if (typeof window !== "undefined") {
       window.removeEventListener("beforeunload", markLeft);
       window.removeEventListener("pagehide", markLeft);
@@ -137,9 +200,9 @@ export function startAudiencePresence(
 }
 
 /**
- * Subscribes to the real-time active attendee count for an event code.
- * Filters out stale sessions (lastSeenAt older than 60s) or sessions marked left.
- * Returns unsubscribe function.
+ * Subscribes to the privacy-preserving active attendee count for an event code.
+ * Queries the derived count from the server without exposing individual attendee
+ * session documents or sensitive user information to the public.
  */
 export function subscribeActiveAttendeeCount(
   rawEventCode: string,
@@ -152,50 +215,30 @@ export function subscribeActiveAttendeeCount(
   }
 
   const eventCode = val.code;
-  const targetDb = getActiveDb();
-  if (!targetDb) {
-    onUpdate(0);
-    return () => {};
-  }
+  let isMounted = true;
 
-  try {
-    const presenceColRef = collection(
-      targetDb as never,
-      PUBLIC_COLLECTION,
-      eventCode,
-      "presence"
-    );
-
-    const q = query(presenceColRef);
-
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const threshold = Date.now() - STALE_TIMEOUT_MS;
-        let activeCount = 0;
-
-        snapshot.forEach((docSnap) => {
-          const data = docSnap.data();
-          if (
-            data &&
-            data.status === "active" &&
-            typeof data.lastSeenAt === "number" &&
-            data.lastSeenAt >= threshold
-          ) {
-            activeCount++;
-          }
-        });
-
-        onUpdate(activeCount);
-      },
-      (err) => {
-        console.warn(`[Presence Subscription Warning for ${eventCode}]:`, err);
+  const fetchCount = async () => {
+    try {
+      const res = await fetch(`/api/events/presence?code=${encodeURIComponent(eventCode)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (isMounted && data && typeof data.activeCount === "number") {
+          onUpdate(data.activeCount);
+        }
       }
-    );
+    } catch {
+      // ignore
+    }
+  };
 
-    return unsubscribe;
-  } catch (err) {
-    console.warn(`[Presence Setup Error for ${eventCode}]:`, err);
-    return () => {};
-  }
+  // Immediate initial count
+  fetchCount();
+
+  // Periodic count polling (every 10s)
+  const intervalId = setInterval(fetchCount, COUNT_POLL_INTERVAL_MS);
+
+  return () => {
+    isMounted = false;
+    clearInterval(intervalId);
+  };
 }

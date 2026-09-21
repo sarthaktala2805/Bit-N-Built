@@ -180,7 +180,18 @@ export function registerPublicEvent(
     return;
   }
 
-  const effectiveOwner = ownerUserId || event.ownerUserId || "organizer";
+  let authUid: string | undefined;
+  try {
+    const authInstance =
+      typeof (fb as Record<string, unknown>).getFirebaseAuth === "function"
+        ? ((fb as Record<string, unknown>).getFirebaseAuth as () => { currentUser?: { uid?: string } })()
+        : ((fb as Record<string, unknown>).auth as { currentUser?: { uid?: string } } | undefined);
+    authUid = authInstance?.currentUser?.uid;
+  } catch {
+    // ignore
+  }
+
+  const effectiveOwner = ownerUserId || event.ownerUserId || authUid || "organizer";
   const publicDoc = buildPublicEventDocument(event, sessions, speakers, effectiveOwner);
 
   const bundle: PublicEventBundle = {
