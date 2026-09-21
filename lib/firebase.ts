@@ -12,6 +12,8 @@ function cleanEnv(val?: string): string | undefined {
   return trimmed === "" ? undefined : trimmed;
 }
 
+// Statically analyzable by Next.js compiler — values inlined at build time into client bundle.
+// No dynamic process.env[key] lookups or server-only runtime env helpers.
 export const firebaseConfig = {
   apiKey: cleanEnv(process.env.NEXT_PUBLIC_FIREBASE_API_KEY),
   authDomain: cleanEnv(process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN),
@@ -45,53 +47,48 @@ export function getFirebaseConfigStatus(): Record<string, "PRESENT" | "MISSING">
   };
 }
 
-let cachedApp: FirebaseApp | null = null;
-let cachedAuth: Auth | null = null;
-let cachedDb: Firestore | null = null;
-
 export function getFirebaseApp(): FirebaseApp {
-  if (cachedApp) {
-    return cachedApp;
-  }
-  const existingApps = getApps();
-  if (existingApps.length > 0) {
-    cachedApp = existingApps[0];
-    return cachedApp;
-  }
   if (!isFirebaseConfigured()) {
     throw new Error(
-      "Firebase Auth is not initialized. Please ensure NEXT_PUBLIC_FIREBASE_API_KEY is configured."
+      "Firebase Auth is not initialized. Please ensure NEXT_PUBLIC_FIREBASE_API_KEY is configured in your Vercel Project Settings."
     );
   }
-  cachedApp = initializeApp(firebaseConfig);
-  return cachedApp;
+  if (getApps().length > 0) {
+    return getApp();
+  }
+  return initializeApp(firebaseConfig);
 }
 
 export function getFirebaseAuth(): Auth {
-  if (cachedAuth) {
-    return cachedAuth;
-  }
-  const appInstance = getFirebaseApp();
-  cachedAuth = getAuth(appInstance);
-  return cachedAuth;
+  return getAuth(getFirebaseApp());
 }
 
 export function getFirebaseFirestore(): Firestore {
-  if (cachedDb) {
-    return cachedDb;
-  }
-  const appInstance = getFirebaseApp();
-  cachedDb = getFirestore(appInstance);
-  return cachedDb;
+  return getFirestore(getFirebaseApp());
 }
 
 export const getFirebaseDb = getFirebaseFirestore;
 
-// Robust singletons initialized when configuration is present.
-// When unconfigured during build prerender, values are undefined and guarded by isFirebaseConfigured().
-export const app: FirebaseApp = (isFirebaseConfigured() ? getFirebaseApp() : undefined) as unknown as FirebaseApp;
-export const auth: Auth = (isFirebaseConfigured() ? getFirebaseAuth() : undefined) as unknown as Auth;
-export const db: Firestore = (isFirebaseConfigured() ? getFirebaseFirestore() : undefined) as unknown as Firestore;
+// Singleton instances accessed safely.
+// During build prerendering or when unconfigured, guarded against throwing at import time.
+let safeApp: FirebaseApp | undefined;
+let safeAuth: Auth | undefined;
+let safeDb: Firestore | undefined;
+
+if (isFirebaseConfigured()) {
+  try {
+    safeApp = getFirebaseApp();
+    safeAuth = getFirebaseAuth();
+    safeDb = getFirebaseFirestore();
+  } catch {
+    // Non-blocking for static build prerender
+  }
+}
+
+export const app: FirebaseApp = safeApp as FirebaseApp;
+export const auth: Auth = safeAuth as Auth;
+export const db: Firestore = safeDb as Firestore;
 export const firestore: Firestore = db;
+
 
 

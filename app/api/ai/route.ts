@@ -45,12 +45,11 @@ CRITICAL RULES:
 8. For event builder or file extraction, return a strictly valid JSON object representing the Event Plan.
 9. For invitations, return structured invitation card data matching the required schema.`;
 
-// Verified active models on Gemini v1beta API (ordered by speed and reliability)
+// Verified active models on Gemini API endpoint (ordered by speed, reliability and active status)
 const VERIFIED_ACTIVE_MODELS = [
   "gemini-flash-lite-latest",
-  "gemini-3.1-flash-lite",
-  "gemini-3.5-flash-lite",
   "gemini-3.5-flash",
+  "gemini-3.1-flash-lite",
 ];
 
 function getAvailableApiKeys(): { id: string; key: string }[] {
@@ -77,12 +76,7 @@ function getAvailableModels(): string[] {
   const mFallback1 = process.env.GEMINI_MODEL_FALLBACK_1?.trim();
   const mFallback2 = process.env.GEMINI_MODEL_FALLBACK_2?.trim();
 
-  // If we have a verified last working model, prioritize it first
-  if (lastWorkingModel && VERIFIED_ACTIVE_MODELS.includes(lastWorkingModel) && !models.includes(lastWorkingModel)) {
-    models.push(lastWorkingModel);
-  }
-
-  // Primary and configured fallbacks if not obsolete
+  // Exactly prioritize user-configured primary model first
   if (mPrimary && !models.includes(mPrimary)) models.push(mPrimary);
   if (mFallback1 && !models.includes(mFallback1)) models.push(mFallback1);
   if (mFallback2 && !models.includes(mFallback2)) models.push(mFallback2);
@@ -110,16 +104,23 @@ function classifyError(errorStr: string): { isRetryable: boolean; code: string; 
   const lower = errorStr.toLowerCase();
 
   if (lower.includes("timeout") || lower.includes("aborted")) {
-    return { isRetryable: true, code: "AI_TIMEOUT_ERROR", message: "Request timed out.", status: 504 };
+    return { isRetryable: true, code: "GEMINI_NETWORK_ERROR", message: "AI request timed out. Please try again.", status: 504 };
   }
   if (lower.includes("429") || lower.includes("quota") || lower.includes("resource_exhausted") || lower.includes("rate limit")) {
-    return { isRetryable: true, code: "AI_RATE_LIMIT_ERROR", message: "Rate limit or quota reached on model/key.", status: 429 };
+    return { isRetryable: true, code: "GEMINI_RATE_LIMIT", message: "AI service rate limit reached. Please wait a moment and try again.", status: 429 };
   }
   if (lower.includes("503") || lower.includes("unavailable") || lower.includes("overloaded") || lower.includes("high demand")) {
-    return { isRetryable: true, code: "AI_SERVICE_UNAVAILABLE", message: "Service temporarily unavailable.", status: 503 };
+    return { isRetryable: true, code: "GEMINI_NETWORK_ERROR", message: "AI service is temporarily overloaded or unavailable.", status: 503 };
   }
-  if (lower.includes("404") || lower.includes("not_found") || lower.includes("model not found") || lower.includes("is no longer available")) {
-    return { isRetryable: true, code: "AI_MODEL_ERROR", message: "Requested model is deprecated or not available.", status: 404 };
+  if (
+    lower.includes("404") ||
+    lower.includes("not_found") ||
+    lower.includes("model not found") ||
+    lower.includes("is not found") ||
+    lower.includes("is no longer available") ||
+    lower.includes("models/")
+  ) {
+    return { isRetryable: true, code: "GEMINI_MODEL_NOT_FOUND", message: "Configured AI model is not found or unsupported.", status: 404 };
   }
   if (
     lower.includes("api key not valid") ||
@@ -128,19 +129,19 @@ function classifyError(errorStr: string): { isRetryable: boolean; code: string; 
     lower.includes("403") ||
     lower.includes("permission_denied")
   ) {
-    return { isRetryable: true, code: "AI_AUTH_ERROR", message: "API key is invalid or unauthorized.", status: 401 };
+    return { isRetryable: true, code: "GEMINI_AUTH_ERROR", message: "Configured Gemini credentials are invalid or unauthorized.", status: 401 };
   }
-  if (lower.includes("fetch failed") || lower.includes("econnreset") || lower.includes("econnrefused")) {
-    return { isRetryable: true, code: "AI_NETWORK_ERROR", message: "Network connection failure.", status: 502 };
+  if (lower.includes("fetch failed") || lower.includes("econnreset") || lower.includes("econnrefused") || lower.includes("enotfound")) {
+    return { isRetryable: true, code: "GEMINI_NETWORK_ERROR", message: "Network connection to AI service failed.", status: 502 };
   }
   if (lower.includes("safety") || lower.includes("blocked") || lower.includes("candidate was blocked")) {
-    return { isRetryable: false, code: "AI_SAFETY_BLOCK", message: "Request was blocked by safety policy.", status: 400 };
+    return { isRetryable: false, code: "GEMINI_REQUEST_FAILED", message: "Request was blocked by safety policy.", status: 400 };
   }
   if (lower.includes("400") || lower.includes("invalid argument") || lower.includes("invalid_argument")) {
-    return { isRetryable: false, code: "AI_INVALID_REQUEST", message: "Invalid request payload.", status: 400 };
+    return { isRetryable: false, code: "GEMINI_REQUEST_FAILED", message: "Invalid AI request parameters.", status: 400 };
   }
 
-  return { isRetryable: true, code: "AI_UNKNOWN_ERROR", message: "Upstream generation failure.", status: 502 };
+  return { isRetryable: true, code: "GEMINI_REQUEST_FAILED", message: "AI generation request failed.", status: 502 };
 }
 
 type GeminiContentPart = string | { inlineData: { mimeType: string; data: string } };
@@ -409,12 +410,12 @@ export async function POST(req: NextRequest) {
   try {
     const apiKeys = getAvailableApiKeys();
     if (apiKeys.length === 0) {
-      console.error("[StageX AI Config] No Gemini API keys found. Set GEMINI_API_KEY_1 in .env.local.");
+      console.error("[StageX AI Config] GEMINI_CONFIG_MISSING: No Gemini API keys found. Set GEMINI_API_KEY_1 in Vercel Project Settings.");
       return NextResponse.json(
         {
           ok: false,
-          code: "AI_AUTH_ERROR",
-          error: "Configured Gemini credentials are invalid or unavailable.",
+          code: "GEMINI_CONFIG_MISSING",
+          error: "Gemini API credentials are not configured. Please configure GEMINI_API_KEY_1 in your Vercel Project Settings.",
         },
         { status: 503 }
       );
@@ -950,16 +951,21 @@ ${promptTask}`;
           return NextResponse.json(
             {
               ok: false,
-              code: result.code || "AI_INVALID_REQUEST",
+              code: result.code || "GEMINI_REQUEST_FAILED",
               error: result.error || "AI request could not be processed.",
             },
             { status: result.status || 400 }
           );
         }
 
-        if (result.code === "AI_AUTH_ERROR") {
-          console.warn(`[StageX AI Auth Skip] Key ${keyId} is unauthorized. Moving to next key.`);
+        if (result.code === "GEMINI_AUTH_ERROR") {
+          console.warn(`[StageX AI Auth Skip] Key ${keyId} is unauthorized or invalid. Skipping remaining models on this key.`);
           break;
+        }
+
+        if (result.code === "GEMINI_MODEL_NOT_FOUND") {
+          console.warn(`[StageX AI Model Skip] Model ${currentModel} is not available for ${keyId}. Trying next fallback model.`);
+          continue;
         }
       }
     }
@@ -1009,17 +1015,22 @@ ${promptTask}`;
       });
     }
 
+    const finalCode = lastError?.code || "GEMINI_REQUEST_FAILED";
     const safeErrorMsg =
-      lastError?.code === "AI_AUTH_ERROR"
-        ? "Configured Gemini credentials are invalid or unavailable."
-        : lastError?.code === "AI_RATE_LIMIT_ERROR"
+      finalCode === "GEMINI_AUTH_ERROR"
+        ? "Configured Gemini credentials are invalid or unauthorized."
+        : finalCode === "GEMINI_MODEL_NOT_FOUND"
+        ? "Configured Gemini model is not supported or unavailable."
+        : finalCode === "GEMINI_RATE_LIMIT"
         ? "AI service rate limit reached. Please wait a moment and try again."
-        : "AI service is temporarily unavailable. Please try again.";
+        : finalCode === "GEMINI_NETWORK_ERROR"
+        ? "Network connection to AI service failed. Please try again."
+        : lastError?.error || "AI service is temporarily unavailable. Please try again.";
 
     return NextResponse.json(
       {
         ok: false,
-        code: lastError?.code || "AI_SERVICE_UNAVAILABLE",
+        code: finalCode,
         error: safeErrorMsg,
         details: process.env.NODE_ENV !== "production" ? attemptDiagnostics : undefined,
       },
