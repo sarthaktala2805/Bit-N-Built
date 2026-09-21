@@ -59,36 +59,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Persistent auth state listener — refreshing the browser keeps the user signed in
   useEffect(() => {
-    const isLocalOrg =
-      typeof window !== "undefined" &&
-      localStorage.getItem("stagex_local_organizer_active") === "true";
-
-    const localOrganizerUser = {
-      uid: "organizer_local_master",
-      email: "organizer@stagex.ai",
-      displayName: "StageX Organizer",
-      emailVerified: true,
-      isAnonymous: false,
-      metadata: {},
-      providerData: [],
-      refreshToken: "",
-      tenantId: null,
-      delete: async () => {},
-      getIdToken: async () => "token",
-      getIdTokenResult: async () => ({
-        token: "token",
-        authTime: "0",
-        issuedAtTime: "0",
-        expirationTime: "0",
-        signInProvider: "custom",
-        claims: {},
-      }),
-      reload: async () => {},
-      toJSON: () => ({}),
-      phoneNumber: null,
-      photoURL: null,
-      providerId: "custom",
-    } as unknown as User;
+    // Clear legacy local organizer bypass so all visitors use the real login page
+    try {
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("stagex_local_organizer_active");
+      }
+    } catch {
+      // ignore
+    }
 
     const authInstance = getActiveAuth();
     if (!authInstance) {
@@ -98,11 +76,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           getFirebaseConfigStatus()
         );
       }
-      if (isLocalOrg) {
-        setUser(localOrganizerUser);
-      } else {
-        setUser(null);
-      }
+      setUser(null);
       setLoading(false);
       return;
     }
@@ -110,14 +84,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const unsubscribe = onAuthStateChanged(authInstance, (firebaseUser) => {
       if (firebaseUser) {
         setUser(firebaseUser);
-        setLoading(false);
-      } else if (isLocalOrg) {
-        setUser(localOrganizerUser);
-        setLoading(false);
       } else {
         setUser(null);
-        setLoading(false);
       }
+      setLoading(false);
     });
     return unsubscribe;
   }, []);

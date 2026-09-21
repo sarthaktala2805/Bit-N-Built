@@ -8,7 +8,7 @@ import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
   const router = useRouter();
-  const { signInEmail, signUpEmail, signInGoogle, signInGuestOrganizer } = useAuth();
+  const { signInEmail, signUpEmail, signInGoogle } = useAuth();
 
   const [role, setRole] = useState<"organizer" | "audience">("organizer");
   const [audienceCode, setAudienceCode] = useState("");
@@ -314,22 +314,6 @@ export default function LoginPage() {
             )}
             {googleLoading ? "Connecting to Google…" : "Continue with Google"}
           </button>
-
-          {/* Instant 1-Click Organizer Access */}
-          <div className="mt-4 pt-4 border-t border-slate-800/80">
-            <button
-              type="button"
-              onClick={async () => {
-                setError(null);
-                await signInGuestOrganizer();
-                router.replace("/dashboard");
-              }}
-              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-semibold bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-300 hover:text-blue-200 transition-all duration-200 shadow-sm"
-            >
-              <ShieldCheck className="w-4 h-4 text-blue-400" />
-              One-Click Organizer Access (Direct Entry)
-            </button>
-          </div>
         </>
       )}
     </div>
