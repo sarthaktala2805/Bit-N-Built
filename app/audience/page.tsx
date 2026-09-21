@@ -31,7 +31,7 @@ import {
 } from "lucide-react";
 import { useEventStore } from "@/store/event-store";
 import { Event, EventResource } from "@/types";
-import { findEventByAccessCode, findEventByAccessCodeAsync, PublicEventBundle } from "@/lib/events-registry";
+import { findEventByAccessCode, findEventByAccessCodeAsync, unregisterPublicEvent, PublicEventBundle } from "@/lib/events-registry";
 import { validateEventCode, normalizeEventCode } from "@/lib/event-code";
 import { startAudiencePresence, subscribeActiveAttendeeCount } from "@/lib/audience-presence";
 import { getMediaObjectUrl } from "@/lib/media-storage";
@@ -407,7 +407,7 @@ function AudiencePortalContent() {
     if (!codeParam) return null;
     return findEventByAccessCode(codeParam, events, sessions, speakers);
   });
-  const [isSearchingCode, setIsSearchingCode] = useState(false);
+  const [isSearchingCode, setIsSearchingCode] = useState(Boolean(codeParam));
 
   // Auto-hydrate
   useEffect(() => {
@@ -428,28 +428,26 @@ function AudiencePortalContent() {
       return;
     }
 
-    // 1. Immediate check from local in-memory store and localStorage
-    const local = findEventByAccessCode(codeParam, events, sessions, speakers);
-    if (local) {
-      setMatchedBundle(local);
-      setIsSearchingCode(false);
-      return;
-    }
-
-    // 2. Asynchronous query to Cloud Firestore and Server API
     let active = true;
     setIsSearchingCode(true);
 
     findEventByAccessCodeAsync(codeParam, events, sessions, speakers)
       .then((res) => {
         if (active) {
-          setMatchedBundle(res);
+          if (!res) {
+            // Event is deleted or not found: purge any local storage cache and clear state
+            unregisterPublicEvent(codeParam);
+            setMatchedBundle(null);
+          } else {
+            setMatchedBundle(res);
+          }
           setIsSearchingCode(false);
         }
       })
       .catch((err) => {
         console.warn("[Audience Lookup Error]:", err);
         if (active) {
+          unregisterPublicEvent(codeParam);
           setMatchedBundle(null);
           setIsSearchingCode(false);
         }

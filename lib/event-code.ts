@@ -74,6 +74,7 @@ export function generateCandidateEventCode(): string {
 
 /**
  * Checks whether an event code already exists in Cloud Firestore publicEvents collection
+ * or is reserved in the deletedCodes tombstone collection (preventing code reuse).
  */
 export async function checkEventCodeExistsInFirestore(code: string): Promise<boolean> {
   const normalized = normalizeEventCode(code);
@@ -85,9 +86,17 @@ export async function checkEventCodeExistsInFirestore(code: string): Promise<boo
         : (fb as Record<string, unknown>).db;
 
     if (targetDb) {
+      // 1. Check if active in publicEvents
       const docRef = doc(targetDb as never, "publicEvents", normalized);
       const snap = await getDoc(docRef);
       if (snap && typeof snap.exists === "function" && snap.exists()) {
+        return true;
+      }
+
+      // 2. Check if reserved in deletedCodes tombstone collection
+      const deletedRef = doc(targetDb as never, "deletedCodes", normalized);
+      const delSnap = await getDoc(deletedRef);
+      if (delSnap && typeof delSnap.exists === "function" && delSnap.exists()) {
         return true;
       }
     }

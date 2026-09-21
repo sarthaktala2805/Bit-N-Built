@@ -213,16 +213,7 @@ export function registerPublicEvent(
   };
 
   // 1. Immediate local storage cache
-  if (typeof window !== "undefined") {
-    try {
-      const raw = window.localStorage.getItem(PUBLIC_DIRECTORY_KEY);
-      const directory: Record<string, PublicEventBundle> = raw ? JSON.parse(raw) : {};
-      directory[codeKey] = bundle;
-      window.localStorage.setItem(PUBLIC_DIRECTORY_KEY, JSON.stringify(directory));
-    } catch (err) {
-      console.warn("[Public Events Registry local save warning]", err);
-    }
-  }
+  saveToLocalDirectory(codeKey, bundle);
 
   // 2. Asynchronously sync to Cloud Firestore publicEvents collection
   if (isCloudReady()) {
@@ -252,9 +243,25 @@ export function registerPublicEvent(
 }
 
 /**
- * Removes an event from the local cache and Cloud Firestore public registry
+ * Saves a verified public event bundle into client localStorage
  */
-export function unregisterPublicEvent(accessCode?: string): void {
+function saveToLocalDirectory(codeKey: string, bundle: PublicEventBundle): void {
+  if (typeof window === "undefined") return;
+  try {
+    const raw = window.localStorage.getItem(PUBLIC_DIRECTORY_KEY);
+    const directory: Record<string, PublicEventBundle> = raw ? JSON.parse(raw) : {};
+    directory[codeKey] = bundle;
+    window.localStorage.setItem(PUBLIC_DIRECTORY_KEY, JSON.stringify(directory));
+  } catch (err) {
+    console.warn("[Public Events Registry local save warning]", err);
+  }
+}
+
+/**
+ * Removes an event from the local cache and Cloud Firestore public registry.
+ * Also records a tombstone in deletedCodes to prevent immediate code reuse.
+ */
+export async function unregisterPublicEvent(accessCode?: string): Promise<void> {
   if (!accessCode) return;
   let codeKey: string;
   try {
@@ -263,6 +270,7 @@ export function unregisterPublicEvent(accessCode?: string): void {
     return;
   }
 
+  // 1. Invalidate client localStorage
   if (typeof window !== "undefined") {
     try {
       const raw = window.localStorage.getItem(PUBLIC_DIRECTORY_KEY);
@@ -276,15 +284,26 @@ export function unregisterPublicEvent(accessCode?: string): void {
     }
   }
 
+  // 2. Invalidate Cloud Firestore documents
   if (isCloudReady()) {
     try {
       const targetDb = getActiveDb();
       if (targetDb) {
+        // A. Remove public directory entry
         const docRef = doc(targetDb as never, PUBLIC_COLLECTION, codeKey);
-        deleteDoc(docRef).catch(() => {});
+        await deleteDoc(docRef).catch(() => {});
 
+        // B. Remove legacy directory entry
         const legacyRef = doc(targetDb as never, LEGACY_PUBLIC_COLLECTION, codeKey);
-        deleteDoc(legacyRef).catch(() => {});
+        await deleteDoc(legacyRef).catch(() => {});
+
+        // C. Record reserved/tombstone in deletedCodes to prevent immediate code reuse
+        const deletedRef = doc(targetDb as never, "deletedCodes", codeKey);
+        await setDoc(deletedRef, {
+          eventCode: codeKey,
+          isDeleted: true,
+          deletedAt: Date.now(),
+        } as never, { merge: true }).catch(() => {});
       }
     } catch {
       // ignore
@@ -298,8 +317,18 @@ export function unregisterPublicEvent(accessCode?: string): void {
 function parsePublicDocumentData(code: string, data: Record<string, unknown>): PublicEventBundle | null {
   if (!data) return null;
 
+  // Check deleted status: if explicitly deleted, conceal event
+  if (data.isDeleted === true) {
+    return null;
+  }
+
   // Check publicEnabled flag: if explicitly false, conceal event (prevent leak)
   if (data.publicEnabled === false) {
+    return null;
+  }
+
+  // Exact code matching check
+  if (data.eventCode && String(data.eventCode).trim().toUpperCase() !== code) {
     return null;
   }
 
@@ -357,7 +386,8 @@ function parsePublicDocumentData(code: string, data: Record<string, unknown>): P
 }
 
 /**
- * Synchronously searches for an event by 6-character code in current in-memory store and local storage.
+ * Synchronously searches for an active event by 6-character code in current in-memory store.
+ * Note: Never returns unverified stale localStorage to prevent resurrecting deleted events.
  */
 export function findEventByAccessCode(
   rawCode: string,
@@ -369,12 +399,12 @@ export function findEventByAccessCode(
   if (!validation.valid) return null;
   const code = validation.code;
 
-  // 1. Check current store events
+  // Check current store events (only live, non-deleted events)
   const foundInStore = currentStoreEvents.find(
-    (e) => (e.accessCode || "").toUpperCase() === code
+    (e) => (e.accessCode || "").trim().toUpperCase() === code
   );
   if (foundInStore) {
-    if (foundInStore.publicEnabled === false) {
+    if (foundInStore.publicEnabled === false || (foundInStore as unknown as Record<string, unknown>).isDeleted) {
       return null;
     }
     return {
@@ -388,35 +418,15 @@ export function findEventByAccessCode(
     };
   }
 
-  if (typeof window === "undefined") return null;
-
-  // 2. Check public directory in localStorage
-  try {
-    const raw = window.localStorage.getItem(PUBLIC_DIRECTORY_KEY);
-    if (raw) {
-      const directory: Record<string, PublicEventBundle> = JSON.parse(raw);
-      if (directory[code]) {
-        const item = directory[code];
-        if (item.publicEnabled === false || item.event?.publicEnabled === false) {
-          return null;
-        }
-        return item;
-      }
-    }
-  } catch {
-    // ignore
-  }
-
   return null;
 }
 
 /**
  * Asynchronously searches for an event by 6-character code globally:
- * 1. Checks local cache / memory first (synchronous instant match).
- * 2. If not found, fetches from Cloud Firestore publicEvents/{code} across accounts/devices.
- * 3. Falls back to legacy public_events/{code} if needed.
- * 4. Falls back to server API endpoint (/api/events/audience?code=...).
- * 5. Saves found event bundle to local cache for offline/instant reload.
+ * 1. Checks in-memory store for active organizer events.
+ * 2. Fetches authoritative status from Cloud Firestore publicEvents/{code}.
+ * 3. Falls back to server API endpoint (/api/events/audience?code=...).
+ * 4. If not found or deleted on the server, purges local cache and returns null.
  */
 export async function findEventByAccessCodeAsync(
   rawCode: string,
@@ -428,13 +438,26 @@ export async function findEventByAccessCodeAsync(
   if (!validation.valid) return null;
   const code = validation.code;
 
-  // Step 1: Check synchronous local store & localStorage
-  const localMatch = findEventByAccessCode(code, currentStoreEvents, currentSessions, currentSpeakers);
-  if (localMatch) {
-    return localMatch;
+  // Step 1: Check in-memory store (active organizer session)
+  const storeMatch = currentStoreEvents.find(
+    (e) => (e.accessCode || "").trim().toUpperCase() === code
+  );
+  if (storeMatch) {
+    if (storeMatch.publicEnabled === false || (storeMatch as unknown as Record<string, unknown>).isDeleted) {
+      return null;
+    }
+    return {
+      event: storeMatch,
+      sessions: currentSessions.filter((s) => s.eventId === storeMatch.id),
+      speakers: currentSpeakers.filter((s) => s.eventId === storeMatch.id),
+      updatedAt: storeMatch.updatedAt,
+      publicEnabled: true,
+      joinEnabled: storeMatch.joinEnabled !== false,
+      ownerUserId: storeMatch.ownerUserId,
+    };
   }
 
-  // Step 2: Attempt Firestore direct client read from publicEvents/{code}
+  // Step 2: Attempt authoritative Firestore direct client read from publicEvents/{code}
   if (isCloudReady()) {
     try {
       const targetDb = getActiveDb();
@@ -451,10 +474,12 @@ export async function findEventByAccessCodeAsync(
 
         if (snapshot && typeof snapshot.exists === "function" && snapshot.exists()) {
           const data = snapshot.data() as Record<string, unknown>;
-          const bundle = parsePublicDocumentData(code, data);
-          if (bundle) {
-            registerPublicEvent(bundle.event, bundle.sessions, bundle.speakers, bundle.ownerUserId);
-            return bundle;
+          if (data && data.isDeleted !== true && data.publicEnabled !== false) {
+            const bundle = parsePublicDocumentData(code, data);
+            if (bundle) {
+              saveToLocalDirectory(code, bundle);
+              return bundle;
+            }
           }
         }
       }
@@ -463,16 +488,26 @@ export async function findEventByAccessCodeAsync(
     }
   }
 
-  // Step 3: Fallback to server API endpoint (/api/events/audience?code=...)
+  // Step 3: Authoritative fallback to server API endpoint (/api/events/audience?code=...)
   if (typeof window !== "undefined") {
     try {
-      const response = await fetch(`/api/events/audience?code=${encodeURIComponent(code)}`);
+      const response = await fetch(`/api/events/audience?code=${encodeURIComponent(code)}`, {
+        cache: "no-store",
+        headers: {
+          Pragma: "no-cache",
+          "Cache-Control": "no-cache",
+        },
+      });
       if (response.ok) {
         const json = await response.json();
         if (json.ok && json.data && json.data.event) {
           const bundle = json.data as PublicEventBundle;
-          if (bundle.publicEnabled !== false && bundle.event.publicEnabled !== false) {
-            registerPublicEvent(bundle.event, bundle.sessions, bundle.speakers, bundle.ownerUserId);
+          if (
+            bundle.publicEnabled !== false &&
+            bundle.event.publicEnabled !== false &&
+            (bundle.event as unknown as Record<string, unknown>).isDeleted !== true
+          ) {
+            saveToLocalDirectory(code, bundle);
             return bundle;
           }
         }
@@ -482,5 +517,8 @@ export async function findEventByAccessCodeAsync(
     }
   }
 
+  // Step 4: Event is deleted or not found on the server/Firestore.
+  // Purge any stale entry from client localStorage so it never resurrects!
+  await unregisterPublicEvent(code);
   return null;
 }

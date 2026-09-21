@@ -273,14 +273,20 @@ export async function deleteEventFromFirestore(
     for (const sub of subcollections) {
       const subRef = collection(targetDb, "users", userId, "events", eventId, sub);
       const snap = await getDocs(subRef);
-      snap.forEach((d) => batch.delete(d.ref));
+      if (snap && typeof snap.forEach === "function") {
+        snap.forEach((d) => batch.delete(d.ref));
+      }
     }
 
     // Delete the event document itself
     const eventRef = doc(targetDb, getEventDocPath(userId, eventId));
-    batch.delete(eventRef);
+    if (batch && typeof batch.delete === "function") {
+      batch.delete(eventRef);
+    }
 
-    await batch.commit();
+    if (batch && typeof batch.commit === "function") {
+      await batch.commit();
+    }
     return { ok: true };
   } catch (err) {
     console.warn(`[Firestore deleteEvent warning] user=${userId} event=${eventId}:`, err);

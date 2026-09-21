@@ -98,6 +98,7 @@ import {
   deleteAIConversationInFirestore,
 } from "@/lib/firestore/ai-conversations";
 import { registerPublicEvent, unregisterPublicEvent } from "@/lib/events-registry";
+import { deleteEventResourceFile } from "@/lib/resource-storage";
 import { generateCandidateEventCode, normalizeEventCode } from "@/lib/event-code";
 
 export interface EventStoreState {
@@ -1242,10 +1243,23 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
     const event = get().events.find((e) => e.id === id);
     if (!event) return { ok: false, error: "Event not found." };
 
+    // 1. Invalidate public registry & tombstone event code
     if (event.accessCode) {
-      unregisterPublicEvent(event.accessCode);
+      unregisterPublicEvent(event.accessCode).catch((err) => {
+        console.warn("[unregisterPublicEvent warning on delete]", err);
+      });
     }
 
+    // 2. Clean up associated Supabase binary files
+    if (event.resources && event.resources.length > 0) {
+      for (const res of event.resources) {
+        if (res.storagePath) {
+          deleteEventResourceFile(res.storagePath, event.accessCode, res.id).catch(() => {});
+        }
+      }
+    }
+
+    // 3. Update local state and clear active/selected references
     set((state) => {
       // Cascade delete everything related to this event
       const nextEvents = state.events.filter((e) => e.id !== id);
@@ -1275,7 +1289,7 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
       return updated;
     });
 
-    // Asynchronously delete from Cloud Firestore (including subcollection documents)
+    // 4. Asynchronously delete from Cloud Firestore (including subcollection documents)
     const uid = get().activeUserId;
     if (uid) {
       deleteEventFromFirestore(uid, id).catch((err) => {

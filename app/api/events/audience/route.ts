@@ -7,6 +7,11 @@ import { getFirebaseDb, isFirebaseConfigured, db } from "@/lib/firebase";
 import { doc, getDoc } from "firebase/firestore";
 import { validateEventCode } from "@/lib/event-code";
 
+const NO_CACHE_HEADERS = {
+  "Cache-Control": "private, no-cache, no-store, max-age=0, must-revalidate",
+  Pragma: "no-cache",
+};
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
@@ -15,8 +20,8 @@ export async function GET(request: NextRequest) {
 
     if (!val.valid) {
       return NextResponse.json(
-        { ok: false, error: val.error || "A valid 6-character event code is required." },
-        { status: 400 }
+        { ok: false, success: false, error: val.error || "A valid 6-character event code is required." },
+        { status: 400, headers: NO_CACHE_HEADERS }
       );
     }
 
@@ -24,16 +29,16 @@ export async function GET(request: NextRequest) {
 
     if (!isFirebaseConfigured()) {
       return NextResponse.json(
-        { ok: false, error: "Firebase is not configured on the server." },
-        { status: 503 }
+        { ok: false, success: false, error: "Firebase is not configured on the server." },
+        { status: 503, headers: NO_CACHE_HEADERS }
       );
     }
 
     const targetDb = getFirebaseDb() || db;
     if (!targetDb) {
       return NextResponse.json(
-        { ok: false, error: "Database connection unavailable." },
-        { status: 500 }
+        { ok: false, success: false, error: "Database connection unavailable." },
+        { status: 500, headers: NO_CACHE_HEADERS }
       );
     }
 
@@ -55,35 +60,44 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(
         {
           ok: false,
+          success: false,
           error: isPermission
             ? "Firestore permission denied. Please ensure Firestore Security Rules allow public read on publicEvents/{eventCode} in Firebase Console."
             : `Failed to query event code: ${errMsg}`,
           details: errMsg,
         },
-        { status: isPermission ? 403 : 500 }
+        { status: isPermission ? 403 : 500, headers: NO_CACHE_HEADERS }
       );
     }
 
     if (!snapshot.exists()) {
       return NextResponse.json(
-        { ok: false, error: `No event found matching code "${cleanCode}".` },
-        { status: 404 }
+        { ok: false, success: false, error: "EVENT_NOT_FOUND" },
+        { status: 404, headers: NO_CACHE_HEADERS }
       );
     }
 
     const data = snapshot.data();
     if (!data) {
       return NextResponse.json(
-        { ok: false, error: "Event data format is invalid." },
-        { status: 500 }
+        { ok: false, success: false, error: "EVENT_NOT_FOUND" },
+        { status: 404, headers: NO_CACHE_HEADERS }
       );
     }
 
-    // If public access is disabled, conceal event existence to prevent data leakage
-    if (data.publicEnabled === false) {
+    // If marked deleted or public access is disabled, return clean not-found response
+    if (data.isDeleted === true || data.publicEnabled === false) {
       return NextResponse.json(
-        { ok: false, error: `No event found matching code "${cleanCode}".` },
-        { status: 404 }
+        { ok: false, success: false, error: "EVENT_NOT_FOUND" },
+        { status: 404, headers: NO_CACHE_HEADERS }
+      );
+    }
+
+    // Exact code matching check
+    if (data.eventCode && String(data.eventCode).trim().toUpperCase() !== cleanCode) {
+      return NextResponse.json(
+        { ok: false, success: false, error: "EVENT_NOT_FOUND" },
+        { status: 404, headers: NO_CACHE_HEADERS }
       );
     }
 
@@ -92,10 +106,11 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(
         {
           ok: false,
+          success: false,
           joinDisabled: true,
           error: "This event is currently not accepting audience members.",
         },
-        { status: 403 }
+        { status: 403, headers: NO_CACHE_HEADERS }
       );
     }
 
@@ -132,6 +147,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(
       {
         ok: true,
+        success: true,
         data: {
           event: sanitizedEvent,
           sessions: Array.isArray(data.sessions) ? data.sessions : [],
@@ -143,16 +159,14 @@ export async function GET(request: NextRequest) {
         },
       },
       {
-        headers: {
-          "Cache-Control": "public, s-maxage=15, stale-while-revalidate=60",
-        },
+        headers: NO_CACHE_HEADERS,
       }
     );
   } catch (err) {
     console.error("[API Audience Event Lookup Error]:", err);
     return NextResponse.json(
-      { ok: false, error: "Failed to look up event code." },
-      { status: 500 }
+      { ok: false, success: false, error: "Failed to look up event code." },
+      { status: 500, headers: NO_CACHE_HEADERS }
     );
   }
 }

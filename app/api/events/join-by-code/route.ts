@@ -67,23 +67,24 @@ export async function POST(request: NextRequest) {
 
     if (!snapshot.exists()) {
       return NextResponse.json(
-        { ok: false, error: `No event found matching code "${cleanCode}".` },
-        { status: 404 }
+        { ok: false, success: false, error: "EVENT_NOT_FOUND" },
+        { status: 404, headers: { "Cache-Control": "private, no-cache, no-store, max-age=0, must-revalidate", Pragma: "no-cache" } }
       );
     }
 
     const data = snapshot.data();
-    if (!data) {
+    if (!data || data.isDeleted === true || data.publicEnabled === false) {
       return NextResponse.json(
-        { ok: false, error: "Event data format is invalid." },
-        { status: 500 }
+        { ok: false, success: false, error: "EVENT_NOT_FOUND" },
+        { status: 404, headers: { "Cache-Control": "private, no-cache, no-store, max-age=0, must-revalidate", Pragma: "no-cache" } }
       );
     }
 
-    if (data.publicEnabled === false) {
+    // Exact code matching check
+    if (data.eventCode && String(data.eventCode).trim().toUpperCase() !== cleanCode) {
       return NextResponse.json(
-        { ok: false, error: `No event found matching code "${cleanCode}".` },
-        { status: 404 }
+        { ok: false, success: false, error: "EVENT_NOT_FOUND" },
+        { status: 404, headers: { "Cache-Control": "private, no-cache, no-store, max-age=0, must-revalidate", Pragma: "no-cache" } }
       );
     }
 

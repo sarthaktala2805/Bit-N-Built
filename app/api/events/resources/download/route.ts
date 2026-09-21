@@ -58,11 +58,19 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // 3. Authorization check: Event must be public
-    if (publicDoc && publicDoc.publicEnabled === false) {
+    // 3. Authorization check: Event must exist, be public, and not be deleted
+    if (publicDoc) {
+      if (publicDoc.publicEnabled === false || (publicDoc as unknown as Record<string, unknown>).isDeleted === true) {
+        return NextResponse.json(
+          { ok: false, success: false, error: "EVENT_NOT_FOUND" },
+          { status: 404, headers: { "Cache-Control": "private, no-cache, no-store, max-age=0, must-revalidate" } }
+        );
+      }
+    } else if (isFirebaseConfigured()) {
+      // In configured Firebase environments, missing public document means event was deleted or does not exist
       return NextResponse.json(
-        { ok: false, error: "This event's resources are private." },
-        { status: 403 }
+        { ok: false, success: false, error: "EVENT_NOT_FOUND" },
+        { status: 404, headers: { "Cache-Control": "private, no-cache, no-store, max-age=0, must-revalidate" } }
       );
     }
 
@@ -73,13 +81,11 @@ export async function GET(request: NextRequest) {
 
     const targetResource = resources.find((r) => r.id === resourceId);
 
-    if (!targetResource) {
-      if (publicDoc) {
-        return NextResponse.json(
-          { ok: false, error: "Resource not found in this event." },
-          { status: 404 }
-        );
-      }
+    if (publicDoc && !targetResource) {
+      return NextResponse.json(
+        { ok: false, success: false, error: "Resource not found in this event." },
+        { status: 404, headers: { "Cache-Control": "private, no-cache, no-store, max-age=0, must-revalidate" } }
+      );
     }
 
     const fileUrl = targetResource?.url || searchParams.get("url") || "";
