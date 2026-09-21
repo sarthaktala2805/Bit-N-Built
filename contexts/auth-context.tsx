@@ -17,7 +17,7 @@ import {
   signInWithPopup,
   AuthError,
 } from "firebase/auth";
-import { auth } from "@/lib/firebase";
+import { auth, getFirebaseAuth } from "@/lib/firebase";
 import { useEventStore } from "@/store/event-store";
 
 interface AuthContextValue {
@@ -42,37 +42,49 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       typeof window !== "undefined" &&
       localStorage.getItem("stagex_local_organizer_active") === "true";
 
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+    const localOrganizerUser = {
+      uid: "organizer_local_master",
+      email: "organizer@stagex.ai",
+      displayName: "StageX Organizer",
+      emailVerified: true,
+      isAnonymous: false,
+      metadata: {},
+      providerData: [],
+      refreshToken: "",
+      tenantId: null,
+      delete: async () => {},
+      getIdToken: async () => "token",
+      getIdTokenResult: async () => ({
+        token: "token",
+        authTime: "0",
+        issuedAtTime: "0",
+        expirationTime: "0",
+        signInProvider: "custom",
+        claims: {},
+      }),
+      reload: async () => {},
+      toJSON: () => ({}),
+      phoneNumber: null,
+      photoURL: null,
+      providerId: "custom",
+    } as unknown as User;
+
+    const authInstance = (typeof getFirebaseAuth === "function" ? getFirebaseAuth() : null) || auth;
+    if (!authInstance) {
+      if (isLocalOrg) {
+        setUser(localOrganizerUser);
+      } else {
+        setUser(null);
+      }
+      setLoading(false);
+      return;
+    }
+
+    const unsubscribe = onAuthStateChanged(authInstance, (firebaseUser) => {
       if (firebaseUser) {
         setUser(firebaseUser);
         setLoading(false);
       } else if (isLocalOrg) {
-        const localOrganizerUser = {
-          uid: "organizer_local_master",
-          email: "organizer@stagex.ai",
-          displayName: "StageX Organizer",
-          emailVerified: true,
-          isAnonymous: false,
-          metadata: {},
-          providerData: [],
-          refreshToken: "",
-          tenantId: null,
-          delete: async () => {},
-          getIdToken: async () => "token",
-          getIdTokenResult: async () => ({
-            token: "token",
-            authTime: "0",
-            issuedAtTime: "0",
-            expirationTime: "0",
-            signInProvider: "custom",
-            claims: {},
-          }),
-          reload: async () => {},
-          toJSON: () => ({}),
-          phoneNumber: null,
-          photoURL: null,
-          providerId: "custom",
-        } as unknown as User;
         setUser(localOrganizerUser);
         setLoading(false);
       } else {
@@ -84,14 +96,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signInEmail = async (email: string, password: string) => {
+    const authInstance = (typeof getFirebaseAuth === "function" ? getFirebaseAuth() : null) || auth;
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      await signInWithEmailAndPassword(authInstance, email, password);
     } catch (err: unknown) {
       const code = (err as AuthError)?.code;
       // If user is not found, automatically register them as an organizer so they are never blocked
       if (code === "auth/user-not-found" || code === "auth/invalid-credential") {
         try {
-          await createUserWithEmailAndPassword(auth, email, password);
+          await createUserWithEmailAndPassword(authInstance, email, password);
           return;
         } catch (signupErr) {
           throw signupErr;
@@ -102,13 +115,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signUpEmail = async (email: string, password: string) => {
-    await createUserWithEmailAndPassword(auth, email, password);
+    const authInstance = (typeof getFirebaseAuth === "function" ? getFirebaseAuth() : null) || auth;
+    await createUserWithEmailAndPassword(authInstance, email, password);
   };
 
   const signInGoogle = async () => {
+    const authInstance = (typeof getFirebaseAuth === "function" ? getFirebaseAuth() : null) || auth;
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: "select_account" });
-    await signInWithPopup(auth, provider);
+    await signInWithPopup(authInstance, provider);
   };
 
   const signInGuestOrganizer = async () => {
@@ -161,7 +176,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     useEventStore.getState().clearState();
     try {
-      await signOut(auth);
+      const authInstance = (typeof getFirebaseAuth === "function" ? getFirebaseAuth() : null) || auth;
+      await signOut(authInstance);
     } catch {
       setUser(null);
     }
