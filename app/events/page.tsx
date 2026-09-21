@@ -25,6 +25,7 @@ import {
   Check,
   ExternalLink,
   Sparkles,
+  Share2,
 } from "lucide-react";
 import { useEventStore } from "@/store/event-store";
 import { Event } from "@/types";
@@ -56,11 +57,20 @@ export default function EventsPage() {
   const [eventToDelete, setEventToDelete] = useState<Event | null>(null);
   const [eventForResources, setEventForResources] = useState<Event | null>(null);
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
+  const [copiedShareId, setCopiedShareId] = useState<string | null>(null);
 
   const handleCopyCode = (code: string) => {
     navigator.clipboard.writeText(code);
     setCopiedCode(code);
     setTimeout(() => setCopiedCode(null), 2000);
+  };
+
+  const handleShareEvent = (code: string, eventId: string) => {
+    if (!code) return;
+    const shareUrl = `${window.location.origin}/audience?code=${code}`;
+    navigator.clipboard.writeText(shareUrl);
+    setCopiedShareId(eventId);
+    setTimeout(() => setCopiedShareId(null), 2000);
   };
 
   const handleDeleteConfirm = () => {
@@ -241,39 +251,54 @@ export default function EventsPage() {
                   )}
 
                   {/* 6-Character Audience Code Badge */}
-                  <div className="flex items-center justify-between px-3 py-2 bg-slate-950/80 border border-amber-500/30 rounded-xl mb-3">
-                    <div className="flex items-center gap-2 text-xs text-slate-300">
-                      <KeyRound className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                      <span className="text-[11px] text-slate-400">Audience Code:</span>
-                      <span className="font-mono font-bold text-amber-300 tracking-wider text-xs">
-                        {event.accessCode || "STAGE1"}
-                      </span>
+                  {event.accessCode && (
+                    <div className="flex items-center justify-between px-3 py-2 bg-slate-950/80 border border-amber-500/30 rounded-xl mb-3">
+                      <div className="flex items-center gap-2 text-xs text-slate-300">
+                        <KeyRound className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                        <span className="text-[11px] text-slate-400">Audience Code:</span>
+                        <span className="font-mono font-bold text-amber-300 tracking-wider text-xs">
+                          {event.accessCode}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleCopyCode(event.accessCode!)}
+                          className="text-[11px] text-amber-400 hover:text-amber-300 font-medium flex items-center gap-1 transition"
+                          title="Copy 6-character code"
+                        >
+                          {copiedCode === event.accessCode ? (
+                            <Check className="w-3 h-3 text-emerald-400" />
+                          ) : (
+                            <Copy className="w-3 h-3" />
+                          )}
+                          {copiedCode === event.accessCode ? "Copied" : "Copy"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleShareEvent(event.accessCode!, event.id)}
+                          className="text-[11px] text-slate-400 hover:text-slate-200 font-medium flex items-center gap-1 transition"
+                          title="Copy Public Share Link"
+                        >
+                          {copiedShareId === event.id ? (
+                            <Check className="w-3 h-3 text-emerald-400" />
+                          ) : (
+                            <Share2 className="w-3 h-3" />
+                          )}
+                          {copiedShareId === event.id ? "Link Copied" : "Share"}
+                        </button>
+                        <a
+                          href={`/audience?code=${event.accessCode}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-slate-400 hover:text-blue-400 transition"
+                          title="Open Audience Viewer"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleCopyCode(event.accessCode || "STAGE1")}
-                        className="text-[11px] text-amber-400 hover:text-amber-300 font-medium flex items-center gap-1 transition"
-                        title="Copy 6-character code"
-                      >
-                        {copiedCode === event.accessCode ? (
-                          <Check className="w-3 h-3 text-emerald-400" />
-                        ) : (
-                          <Copy className="w-3 h-3" />
-                        )}
-                        {copiedCode === event.accessCode ? "Copied" : "Copy"}
-                      </button>
-                      <a
-                        href={`/audience?code=${event.accessCode || "STAGE1"}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-slate-400 hover:text-blue-400 transition"
-                        title="Open Audience Viewer"
-                      >
-                        <ExternalLink className="w-3.5 h-3.5" />
-                      </a>
-                    </div>
-                  </div>
+                  )}
 
                   {/* Resources pill button */}
                   <button
@@ -384,7 +409,11 @@ export default function EventsPage() {
                         </Button>
                         <Button
                           onClick={() => {
-                            router.push(`/audience?code=${event.accessCode || "STAGE1"}`);
+                            if (event.accessCode) {
+                              router.push(`/audience?code=${event.accessCode}`);
+                            } else {
+                              router.push("/audience");
+                            }
                           }}
                           variant="primary"
                           size="sm"

@@ -25,10 +25,13 @@ import {
   FileText,
   AlertTriangle,
   RotateCcw,
+  Share2,
 } from "lucide-react";
 import { useEventStore } from "@/store/event-store";
 import { Event, EventResource } from "@/types";
 import { findEventByAccessCode, findEventByAccessCodeAsync, PublicEventBundle } from "@/lib/events-registry";
+import { validateEventCode, normalizeEventCode } from "@/lib/event-code";
+import { startAudiencePresence, subscribeActiveAttendeeCount } from "@/lib/audience-presence";
 import { getMediaObjectUrl } from "@/lib/media-storage";
 
 function getEmbedUrl(rawUrl: string): string | null {
@@ -242,7 +245,9 @@ function AudienceSlideItem({ resource }: { resource: EventResource }) {
 function AudiencePortalContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const codeParam = (searchParams.get("code") || "").trim().toUpperCase();
+  const rawParam = searchParams.get("code") || "";
+  const validatedParam = validateEventCode(rawParam);
+  const codeParam = validatedParam.valid ? validatedParam.code : rawParam.trim().toUpperCase();
 
   const { events, sessions, speakers, hydrated, hydrate } = useEventStore();
 
@@ -250,6 +255,8 @@ function AudiencePortalContent() {
   const [activeTab, setActiveTab] = useState<"videos" | "slides" | "scripts" | "schedule">("videos");
   const [copiedScriptId, setCopiedScriptId] = useState<string | null>(null);
   const [copiedEventCode, setCopiedEventCode] = useState(false);
+  const [copiedShareLink, setCopiedShareLink] = useState(false);
+  const [activeAttendeeCount, setActiveAttendeeCount] = useState<number>(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const [matchedBundle, setMatchedBundle] = useState<PublicEventBundle | null>(() => {
@@ -313,6 +320,26 @@ function AudiencePortalContent() {
   const eventSessions = matchedBundle?.sessions || [];
   const eventSpeakers = matchedBundle?.speakers || [];
 
+  const isJoinDisabled = Boolean(
+    currentEvent &&
+      (matchedBundle?.joinEnabled === false || currentEvent.joinEnabled === false)
+  );
+
+  // Real-time audience presence session & active attendee count
+  useEffect(() => {
+    if (!currentEvent || !currentEvent.accessCode || isJoinDisabled) return;
+
+    const cleanupPresence = startAudiencePresence(currentEvent.accessCode, null);
+    const unsubscribeCount = subscribeActiveAttendeeCount(currentEvent.accessCode, (count) => {
+      setActiveAttendeeCount(count);
+    });
+
+    return () => {
+      cleanupPresence();
+      unsubscribeCount();
+    };
+  }, [currentEvent, isJoinDisabled]);
+
   const resources = currentEvent?.resources || [];
   const videoResources = resources.filter((r) => r.type === "video");
   const pptResources = resources.filter((r) => r.type === "ppt" || r.type === "document");
@@ -320,13 +347,13 @@ function AudiencePortalContent() {
 
   const handleSearchCode = (e: React.FormEvent) => {
     e.preventDefault();
-    const clean = inputCode.trim().toUpperCase();
-    if (clean.length !== 6) {
-      setErrorMsg("Please enter a valid 6-character event code.");
+    const val = validateEventCode(inputCode);
+    if (!val.valid) {
+      setErrorMsg(val.error || "Please enter a valid 6-character event code.");
       return;
     }
     setErrorMsg(null);
-    router.push(`/audience?code=${clean}`);
+    router.push(`/audience?code=${val.code}`);
   };
 
   const handleCopyCode = () => {
@@ -337,6 +364,15 @@ function AudiencePortalContent() {
     }
   };
 
+  const handleCopyShareLink = () => {
+    if (typeof window !== "undefined" && currentEvent?.accessCode) {
+      const shareUrl = `${window.location.origin}/audience?code=${currentEvent.accessCode}`;
+      navigator.clipboard.writeText(shareUrl);
+      setCopiedShareLink(true);
+      setTimeout(() => setCopiedShareLink(false), 2000);
+    }
+  };
+
   const handleCopyScript = (id: string, text: string) => {
     navigator.clipboard.writeText(text);
     setCopiedScriptId(id);
@@ -344,7 +380,11 @@ function AudiencePortalContent() {
   };
 
   // Has code parameter in URL, search completed, but NO event matched: explicit 404
-  const isCodeNotFound = Boolean(codeParam && !isSearchingCode && !currentEvent);
+  const isCodeNotFound = Boolean(
+    codeParam &&
+      !isSearchingCode &&
+      (!currentEvent || currentEvent.publicEnabled === false)
+  );
 
   return (
     <div className="min-h-screen bg-[#070B14] text-slate-100 flex flex-col selection:bg-amber-500 selection:text-black">
@@ -467,6 +507,33 @@ function AudiencePortalContent() {
               </div>
             </form>
           </div>
+        ) : isJoinDisabled ? (
+          /* State D: Valid Event but Joining Disabled */
+          <div className="max-w-md mx-auto mt-12 sm:mt-20 text-center space-y-6">
+            <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center mx-auto text-amber-400 shadow-xl shadow-amber-950/40">
+              <AlertTriangle className="w-8 h-8" />
+            </div>
+
+            <div>
+              <h1 className="text-2xl font-bold text-white tracking-tight">
+                Joining Currently Disabled
+              </h1>
+              <p className="text-xs text-slate-400 mt-2">
+                This event is currently not accepting audience members. Please check with your event organizer.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setInputCode("");
+                router.push("/audience");
+              }}
+              className="px-6 py-2.5 rounded-xl font-semibold text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
+            >
+              Enter Different Code
+            </button>
+          </div>
         ) : !currentEvent ? (
           /* Initial Code Entry Screen (When no code in URL) */
           <div className="max-w-lg mx-auto mt-8 sm:mt-16 text-center space-y-6">
@@ -548,21 +615,50 @@ function AudiencePortalContent() {
                         Live / In Progress
                       </span>
                     )}
+
+                    {activeAttendeeCount > 0 && (
+                      <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                        {activeAttendeeCount} {activeAttendeeCount === 1 ? "Active Attendee" : "Active Attendees"}
+                      </span>
+                    )}
                   </div>
 
-                  {/* 6-Character Event Code Badge */}
-                  <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-950/80 border border-amber-500/40 rounded-xl">
-                    <KeyRound className="w-3.5 h-3.5 text-amber-400" />
-                    <span className="text-[11px] text-slate-400">Event Code:</span>
-                    <span className="font-mono font-bold text-amber-300 tracking-wider text-sm">
-                      {currentEvent.accessCode || codeParam}
-                    </span>
+                  {/* 6-Character Event Code & Share Buttons */}
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-950/80 border border-amber-500/40 rounded-xl">
+                      <KeyRound className="w-3.5 h-3.5 text-amber-400" />
+                      <span className="text-[11px] text-slate-400">Event Code:</span>
+                      <span className="font-mono font-bold text-amber-300 tracking-wider text-sm">
+                        {currentEvent.accessCode || codeParam}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleCopyCode}
+                        className="ml-1 text-[11px] text-amber-400 hover:text-amber-300 flex items-center gap-1"
+                        title="Copy Event Code"
+                      >
+                        {copiedEventCode ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                      </button>
+                    </div>
+
                     <button
                       type="button"
-                      onClick={handleCopyCode}
-                      className="ml-1 text-[11px] text-amber-400 hover:text-amber-300"
+                      onClick={handleCopyShareLink}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-950/80 hover:bg-slate-900 border border-slate-700 rounded-xl text-xs font-medium text-slate-300 hover:text-white transition"
+                      title="Copy Public Share URL"
                     >
-                      {copiedEventCode ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                      {copiedShareLink ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-400" />
+                          <span className="text-emerald-400 text-[11px]">Copied Link</span>
+                        </>
+                      ) : (
+                        <>
+                          <Share2 className="w-3.5 h-3.5 text-slate-400" />
+                          <span className="text-[11px]">Share</span>
+                        </>
+                      )}
                     </button>
                   </div>
                 </div>

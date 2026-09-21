@@ -50,6 +50,44 @@ export interface Event {
   accessCode?: string; // 6-character alphanumeric code for audience access (e.g. ST8X9B)
   resources?: EventResource[]; // Past meeting resources (video, ppt, script)
   endedAt?: number | null; // epoch ms when meeting ended
+  joinEnabled?: boolean; // Controls whether public attendees can join (default: true)
+  publicEnabled?: boolean; // Controls public directory visibility (default: true)
+  ownerUserId?: string; // UID of the organizer account that owns the event
+}
+
+export interface PublicEventDoc {
+  eventCode: string;
+  eventId: string;
+  ownerUserId: string;
+  publicEnabled: boolean;
+  joinEnabled: boolean;
+  eventName: string;
+  eventType: EventType;
+  eventStatus: EventStatus;
+  scheduledStart: number;
+  scheduledEnd: number;
+  startDate: string;
+  endDate: string;
+  startTime: string;
+  endTime: string;
+  venue: string;
+  description?: string;
+  organizer?: string;
+  posterUrl?: string | null;
+  publicUpdatedAt: number;
+  sessions?: Session[];
+  speakers?: Speaker[];
+  resources?: EventResource[];
+}
+
+export interface AudiencePresenceSession {
+  sessionId: string;
+  eventCode: string;
+  userUid: string;
+  joinedAt: number;
+  lastSeenAt: number;
+  status: "active" | "left";
+  leftAt?: number | null;
 }
 
 export interface Speaker {

@@ -11,12 +11,36 @@ service cloud.firestore {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
 
-    // Public Audience Events Directory:
-    // Anyone (including unauthenticated attendees) can read event records by their 6-character access code.
-    // Organizers can publish and update public events.
+    // Global Public Events Directory:
+    // Event Code is the global document ID: publicEvents/{eventCode}
+    // Anyone (including guest/unauthenticated audience) can read if publicEnabled is true.
+    match /publicEvents/{eventCode} {
+      allow read: if resource == null || resource.data.publicEnabled == true;
+
+      // Only the authenticated organizer matching ownerUserId can publish or modify
+      allow create: if request.auth != null 
+                    && request.resource.data.ownerUserId == request.auth.uid;
+
+      allow update: if request.auth != null 
+                    && resource.data.ownerUserId == request.auth.uid
+                    && request.resource.data.ownerUserId == request.auth.uid;
+
+      allow delete: if request.auth != null 
+                    && resource.data.ownerUserId == request.auth.uid;
+
+      // Audience Presence Subcollection:
+      // Real-time active attendees reporting presence for this event
+      match /presence/{sessionId} {
+        allow read: if true;
+        allow create, update: if true;
+        allow delete: if false;
+      }
+    }
+
+    // Backwards-compatible legacy public_events collection:
     match /public_events/{accessCode} {
       allow read: if true;
-      allow write: if true;
+      allow write: if request.auth != null;
     }
 
     // Default deny all access to any document outside the defined schemas

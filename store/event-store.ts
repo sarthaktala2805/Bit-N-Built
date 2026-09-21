@@ -98,6 +98,7 @@ import {
   deleteAIConversationInFirestore,
 } from "@/lib/firestore/ai-conversations";
 import { registerPublicEvent, unregisterPublicEvent } from "@/lib/events-registry";
+import { generateCandidateEventCode, normalizeEventCode } from "@/lib/event-code";
 
 export interface EventStoreState {
   events: Event[];
@@ -266,12 +267,7 @@ const initialData: PersistedSlice = {
 };
 
 export function generateAccessCode(): string {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let res = "";
-  for (let i = 0; i < 6; i++) {
-    res += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return res;
+  return generateCandidateEventCode();
 }
 
 function generateId(): string {
@@ -305,7 +301,10 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
         endDate: e.endDate || ts.endDate,
         startDateTime: e.startDateTime || ts.startDateTime,
         endDateTime: e.endDateTime || ts.endDateTime,
-        accessCode: e.accessCode || generateAccessCode(),
+        accessCode: e.accessCode ? normalizeEventCode(e.accessCode) : generateCandidateEventCode(),
+        publicEnabled: e.publicEnabled !== false,
+        joinEnabled: e.joinEnabled !== false,
+        ownerUserId: e.ownerUserId || targetUserId || undefined,
         resources: Array.isArray(e.resources) ? e.resources : [],
       };
     });
@@ -370,7 +369,8 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
       registerPublicEvent(
         e,
         normalizedSessions.filter((s) => s.eventId === e.id),
-        (state.speakers || []).filter((s) => s.eventId === e.id)
+        (state.speakers || []).filter((s) => s.eventId === e.id),
+        targetUserId || e.ownerUserId
       );
     });
 
@@ -391,7 +391,10 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
                 endDate: e.endDate || ts.endDate,
                 startDateTime: e.startDateTime || ts.startDateTime,
                 endDateTime: e.endDateTime || ts.endDateTime,
-                accessCode: e.accessCode || generateAccessCode(),
+                accessCode: e.accessCode ? normalizeEventCode(e.accessCode) : generateCandidateEventCode(),
+                publicEnabled: e.publicEnabled !== false,
+                joinEnabled: e.joinEnabled !== false,
+                ownerUserId: targetUserId,
                 resources: Array.isArray(e.resources) ? e.resources : [],
               };
             });
@@ -498,7 +501,7 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
             cloudEvents.forEach((ev) => {
               const evSessions = normalizedCloudSessions.filter((s) => s.eventId === ev.id);
               const evSpeakers = allCloudSpeakers.filter((s) => s.eventId === ev.id);
-              registerPublicEvent(ev, evSessions, evSpeakers);
+              registerPublicEvent(ev, evSessions, evSpeakers, targetUserId);
             });
           }
         })
@@ -956,7 +959,10 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
       endTime: ts.endTime,
       startDateTime: ts.startDateTime,
       endDateTime: ts.endDateTime,
-      accessCode: data.accessCode || generateAccessCode(),
+      accessCode: data.accessCode ? normalizeEventCode(data.accessCode) : generateCandidateEventCode(),
+      publicEnabled: data.publicEnabled !== false,
+      joinEnabled: data.joinEnabled !== false,
+      ownerUserId: get().activeUserId || "organizer",
       resources: Array.isArray(data.resources) ? data.resources : [],
       status: data.status || "Scheduled",
       createdAt: now,
@@ -986,7 +992,7 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
       return updated;
     });
 
-    registerPublicEvent(newEvent);
+    registerPublicEvent(newEvent, [], [], get().activeUserId || undefined);
 
     // Asynchronously write to Cloud Firestore
     const uid = get().activeUserId;
@@ -1214,7 +1220,8 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
     registerPublicEvent(
       updatedEvent,
       get().sessions.filter((s) => s.eventId === id),
-      get().speakers.filter((s) => s.eventId === id)
+      get().speakers.filter((s) => s.eventId === id),
+      get().activeUserId || updatedEvent.ownerUserId
     );
 
     // Asynchronously update Cloud Firestore
@@ -1472,6 +1479,13 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
       });
     }
 
+    registerPublicEvent(
+      updatedEvent,
+      get().sessions.filter((s) => s.eventId === eventId),
+      get().speakers.filter((s) => s.eventId === eventId),
+      uid || updatedEvent.ownerUserId
+    );
+
     return { ok: true };
   },
 
@@ -1572,6 +1586,17 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
       });
     }
 
+    // Re-sync public event
+    const parentEventForUpdate = get().events.find((e) => e.id === speaker.eventId);
+    if (parentEventForUpdate) {
+      registerPublicEvent(
+        parentEventForUpdate,
+        get().sessions.filter((s) => s.eventId === speaker.eventId),
+        get().speakers.filter((s) => s.eventId === speaker.eventId),
+        get().activeUserId || parentEventForUpdate.ownerUserId
+      );
+    }
+
     return { ok: true };
   },
 
@@ -1615,6 +1640,17 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
             console.warn("[Firestore nullify speaker on session failed]", err);
           });
         });
+    }
+
+    // Re-sync public event
+    const parentEventForDelete = get().events.find((e) => e.id === speaker.eventId);
+    if (parentEventForDelete) {
+      registerPublicEvent(
+        parentEventForDelete,
+        get().sessions.filter((s) => s.eventId === speaker.eventId),
+        get().speakers.filter((s) => s.eventId === speaker.eventId),
+        get().activeUserId || parentEventForDelete.ownerUserId
+      );
     }
 
     return { ok: true };
@@ -1772,6 +1808,14 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
       });
     }
 
+    // Re-sync public event
+    registerPublicEvent(
+      event,
+      get().sessions.filter((s) => s.eventId === session.eventId),
+      get().speakers.filter((s) => s.eventId === session.eventId),
+      get().activeUserId || event.ownerUserId
+    );
+
     return { ok: true };
   },
 
@@ -1809,6 +1853,17 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
       createActivityLogInFirestore(uid, session.eventId, newLog).catch((err) => {
         console.warn("[Firestore log deleteSession failed]", err);
       });
+    }
+
+    // Re-sync public event
+    const parentEventForSessionDelete = get().events.find((e) => e.id === session.eventId);
+    if (parentEventForSessionDelete) {
+      registerPublicEvent(
+        parentEventForSessionDelete,
+        get().sessions.filter((s) => s.eventId === session.eventId),
+        get().speakers.filter((s) => s.eventId === session.eventId),
+        get().activeUserId || parentEventForSessionDelete.ownerUserId
+      );
     }
 
     return { ok: true };

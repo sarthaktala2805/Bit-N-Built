@@ -59,7 +59,7 @@ export const PastEventResourcesModal: React.FC<PastEventResourcesModalProps> = (
 
   if (!isOpen) return null;
 
-  const accessCode = event.accessCode || "STAGE1";
+  const accessCode = event.accessCode || "";
   const audienceUrl =
     typeof window !== "undefined"
       ? `${window.location.origin}/audience?code=${accessCode}`

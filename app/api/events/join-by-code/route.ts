@@ -1,16 +1,17 @@
-// StageX AI — Server-side Audience Event Lookup Route
-// GET /api/events/audience?code=ST8X9B
-// Allows audience members anywhere in the world to fetch public event data by event code.
+// StageX AI — Server-side Join By Code Endpoint
+// POST /api/events/join-by-code
+// Request body: { eventCode: string }
+// Resolves global public event directory entry and returns permitted public event bundle.
 
 import { NextRequest, NextResponse } from "next/server";
 import { getFirebaseDb, isFirebaseConfigured, db } from "@/lib/firebase";
 import { doc, getDoc } from "firebase/firestore";
 import { validateEventCode } from "@/lib/event-code";
 
-export async function GET(request: NextRequest) {
+export async function POST(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url);
-    const rawCode = searchParams.get("code") || "";
+    const body = await request.json().catch(() => ({}));
+    const rawCode = body?.eventCode || "";
     const val = validateEventCode(rawCode);
 
     if (!val.valid) {
@@ -62,7 +63,6 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // If public access is disabled, conceal event existence to prevent data leakage
     if (data.publicEnabled === false) {
       return NextResponse.json(
         { ok: false, error: `No event found matching code "${cleanCode}".` },
@@ -70,7 +70,6 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // If join is disabled, report joining disabled
     if (data.joinEnabled === false) {
       return NextResponse.json(
         {
@@ -82,7 +81,6 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Build public bundle
     const rawEvent = (data.event as Record<string, unknown>) || {};
     const sanitizedEvent = {
       id: data.eventId || rawEvent.id || "event_" + cleanCode,
@@ -112,29 +110,22 @@ export async function GET(request: NextRequest) {
       ownerUserId: data.ownerUserId || rawEvent.ownerUserId || "organizer",
     };
 
-    return NextResponse.json(
-      {
-        ok: true,
-        data: {
-          event: sanitizedEvent,
-          sessions: Array.isArray(data.sessions) ? data.sessions : [],
-          speakers: Array.isArray(data.speakers) ? data.speakers : [],
-          updatedAt: typeof data.publicUpdatedAt === "number" ? data.publicUpdatedAt : (data.updatedAt || Date.now()),
-          publicEnabled: true,
-          joinEnabled: true,
-          ownerUserId: sanitizedEvent.ownerUserId,
-        },
+    return NextResponse.json({
+      ok: true,
+      data: {
+        event: sanitizedEvent,
+        sessions: Array.isArray(data.sessions) ? data.sessions : [],
+        speakers: Array.isArray(data.speakers) ? data.speakers : [],
+        updatedAt: typeof data.publicUpdatedAt === "number" ? data.publicUpdatedAt : (data.updatedAt || Date.now()),
+        publicEnabled: true,
+        joinEnabled: true,
+        ownerUserId: sanitizedEvent.ownerUserId,
       },
-      {
-        headers: {
-          "Cache-Control": "public, s-maxage=15, stale-while-revalidate=60",
-        },
-      }
-    );
+    });
   } catch (err) {
-    console.error("[API Audience Event Lookup Error]:", err);
+    console.error("[API Join-By-Code Error]:", err);
     return NextResponse.json(
-      { ok: false, error: "Failed to look up event code." },
+      { ok: false, error: "Failed to join event." },
       { status: 500 }
     );
   }

@@ -31,6 +31,8 @@ import {
   CheckCircle2,
   MapPin,
   Users,
+  PanelLeftClose,
+  PanelLeft,
 } from "lucide-react";
 import { useEventStore } from "@/store/event-store";
 import { buildGlobalAIContext } from "@/lib/ai-context";
@@ -91,6 +93,31 @@ export default function GlobalAICopilotPage() {
 
   // Executing Action State
   const [executingActionId, setExecutingActionId] = useState<string | null>(null);
+
+  // Collapsible sidebar state (ChatGPT / Gemini style)
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
+
+  // Restore sidebar preference from localStorage
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const saved = window.localStorage.getItem("stagex_ai_sidebar_open");
+      if (saved !== null) {
+        setIsSidebarOpen(saved === "true");
+      } else if (window.innerWidth < 768) {
+        setIsSidebarOpen(false);
+      }
+    }
+  }, []);
+
+  const handleToggleSidebar = () => {
+    setIsSidebarOpen((prev) => {
+      const next = !prev;
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem("stagex_ai_sidebar_open", String(next));
+      }
+      return next;
+    });
+  };
 
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -580,17 +607,30 @@ export default function GlobalAICopilotPage() {
 
   return (
     <div className="flex h-[calc(100vh-4rem)] overflow-hidden bg-[#070B14] text-slate-100">
-      {/* ── LEFT SIDEBAR: CONVERSATION HISTORY ── */}
-      <aside className="w-72 border-r border-slate-800/80 bg-slate-950/60 flex flex-col shrink-0">
-        {/* New Chat Button */}
-        <div className="p-3 border-b border-slate-800/60">
+      {/* ── LEFT SIDEBAR: CONVERSATION HISTORY (COLLAPSIBLE) ── */}
+      <aside
+        className={`${
+          isSidebarOpen ? "w-72 opacity-100" : "w-0 opacity-0 pointer-events-none border-none"
+        } transition-all duration-300 ease-in-out border-r border-slate-800/80 bg-slate-950/60 flex flex-col shrink-0 overflow-hidden relative`}
+      >
+        {/* New Chat & Collapse Header */}
+        <div className="p-3 border-b border-slate-800/60 flex items-center gap-2">
           <Button
             onClick={handleStartNewChat}
-            className="w-full justify-start gap-2.5 bg-blue-600 hover:bg-blue-500 text-white font-medium shadow-md shadow-blue-600/20 rounded-xl h-10"
+            className="flex-1 justify-start gap-2.5 bg-blue-600 hover:bg-blue-500 text-white font-medium shadow-md shadow-blue-600/20 rounded-xl h-10 px-3"
           >
             <Plus className="w-4 h-4" />
             <span>New Chat</span>
           </Button>
+
+          <button
+            type="button"
+            onClick={handleToggleSidebar}
+            title="Collapse sidebar"
+            className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800/80 transition flex items-center justify-center shrink-0 h-10 w-10 border border-slate-800/80 hover:border-slate-700"
+          >
+            <PanelLeftClose className="w-4 h-4" />
+          </button>
         </div>
 
         {/* Conversation List */}
@@ -669,8 +709,30 @@ export default function GlobalAICopilotPage() {
       {/* ── MAIN CHAT AREA ── */}
       <main className="flex-1 flex flex-col min-w-0 bg-[#070B14]">
         {/* Top Header Bar */}
-        <header className="h-14 border-b border-slate-800/80 px-6 flex items-center justify-between bg-slate-950/40 backdrop-blur shrink-0">
+        <header className="h-14 border-b border-slate-800/80 px-4 sm:px-6 flex items-center justify-between bg-slate-950/40 backdrop-blur shrink-0">
           <div className="flex items-center gap-3 min-w-0">
+            {/* Show open sidebar toggle button when sidebar is collapsed (ChatGPT / Gemini style) */}
+            {!isSidebarOpen && (
+              <div className="flex items-center gap-1.5 shrink-0 mr-1 animate-in fade-in duration-200">
+                <button
+                  type="button"
+                  onClick={handleToggleSidebar}
+                  title="Open sidebar"
+                  className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800/80 transition flex items-center justify-center h-9 w-9 border border-slate-800/80 hover:border-slate-700 shadow-sm"
+                >
+                  <PanelLeft className="w-4 h-4 text-slate-300" />
+                </button>
+                <button
+                  type="button"
+                  onClick={handleStartNewChat}
+                  title="New chat"
+                  className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800/80 transition flex items-center justify-center h-9 w-9 border border-slate-800/80 hover:border-slate-700 shadow-sm"
+                >
+                  <Plus className="w-4 h-4 text-slate-300" />
+                </button>
+              </div>
+            )}
+
             <div className="w-8 h-8 rounded-lg bg-blue-500/10 border border-blue-500/30 flex items-center justify-center text-blue-400 shrink-0">
               <Sparkles className="w-4 h-4" />
             </div>
