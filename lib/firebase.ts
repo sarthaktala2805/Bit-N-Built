@@ -6,34 +6,35 @@ import { initializeApp, getApps, getApp, FirebaseApp } from "firebase/app";
 import { getAuth, Auth } from "firebase/auth";
 import { getFirestore, Firestore } from "firebase/firestore";
 
-const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
-  measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
-};
+function cleanEnv(val?: string): string | undefined {
+  if (!val) return undefined;
+  const trimmed = val.trim().replace(/^["']|["']$/g, "");
+  return trimmed === "" ? undefined : trimmed;
+}
 
-// Safe singleton — prevents duplicate initialization on Next.js hot reload,
-// SSR, static analysis, and Vercel build prerendering.
+/**
+ * Clean Firebase configuration read directly from NEXT_PUBLIC_* variables.
+ * Automatically strips quotes and whitespace.
+ */
+export function getFirebaseConfig() {
+  return {
+    apiKey: cleanEnv(process.env.NEXT_PUBLIC_FIREBASE_API_KEY),
+    authDomain: cleanEnv(process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN),
+    projectId: cleanEnv(process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID),
+    storageBucket: cleanEnv(process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET),
+    messagingSenderId: cleanEnv(process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID),
+    appId: cleanEnv(process.env.NEXT_PUBLIC_FIREBASE_APP_ID),
+    measurementId: cleanEnv(process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID),
+  };
+}
 
 /**
  * Validates whether the minimum required Firebase configuration is present.
  * Prevents initializing Firebase with undefined/empty credentials during build or SSR.
  */
 export function isFirebaseConfigured(): boolean {
-  const key = process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
-  const project = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
-  return Boolean(
-    key &&
-      typeof key === "string" &&
-      key.trim() !== "" &&
-      project &&
-      typeof project === "string" &&
-      project.trim() !== ""
-  );
+  const config = getFirebaseConfig();
+  return Boolean(config.apiKey && config.projectId);
 }
 
 let cachedApp: FirebaseApp | null = null;
@@ -53,10 +54,11 @@ export function getFirebaseApp(): FirebaseApp | null {
     cachedApp = existingApps[0];
     return cachedApp;
   }
-  if (!isFirebaseConfigured()) {
+  const config = getFirebaseConfig();
+  if (!config.apiKey || !config.projectId) {
     return null;
   }
-  cachedApp = initializeApp(firebaseConfig);
+  cachedApp = initializeApp(config);
   return cachedApp;
 }
 
@@ -95,6 +97,7 @@ export function getFirebaseDb(): Firestore | null {
 // Property accesses during build or without credentials safely return undefined without crashing.
 export const app: FirebaseApp = new Proxy({} as FirebaseApp, {
   get(target, prop, receiver) {
+    if (prop === "__isProxy") return true;
     const instance = getFirebaseApp();
     if (!instance) {
       if (typeof window === "undefined") return undefined;
@@ -109,6 +112,7 @@ export const app: FirebaseApp = new Proxy({} as FirebaseApp, {
 
 export const auth: Auth = new Proxy({} as Auth, {
   get(target, prop, receiver) {
+    if (prop === "__isProxy") return true;
     const instance = getFirebaseAuth();
     if (!instance) {
       if (typeof window === "undefined") return undefined;
@@ -123,6 +127,7 @@ export const auth: Auth = new Proxy({} as Auth, {
 
 export const db: Firestore = new Proxy(Object.create(Firestore.prototype), {
   get(target, prop, receiver) {
+    if (prop === "__isProxy") return true;
     const instance = getFirebaseDb();
     if (!instance) {
       if (typeof window === "undefined") return undefined;

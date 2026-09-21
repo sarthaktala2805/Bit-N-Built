@@ -8,6 +8,7 @@ import React, {
   ReactNode,
 } from "react";
 import {
+  Auth,
   User,
   onAuthStateChanged,
   signInWithEmailAndPassword,
@@ -31,6 +32,18 @@ interface AuthContextValue {
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+
+function getActiveAuth(): Auth | null {
+  if (typeof getFirebaseAuth === "function") {
+    const instance = getFirebaseAuth();
+    if (instance) return instance;
+  }
+  // Allow test runners with custom mock objects (vi.mock) while avoiding the uninitialized proxy
+  if (auth && !(auth as unknown as { __isProxy?: boolean }).__isProxy) {
+    return auth;
+  }
+  return null;
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -69,8 +82,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       providerId: "custom",
     } as unknown as User;
 
-    const authInstance = (typeof getFirebaseAuth === "function" ? getFirebaseAuth() : null) || auth;
+    const authInstance = getActiveAuth();
     if (!authInstance) {
+      if (process.env.NODE_ENV !== "production") {
+        console.warn(
+          "StageX AI: Firebase Auth is not initialized. Ensure NEXT_PUBLIC_FIREBASE_API_KEY and NEXT_PUBLIC_FIREBASE_PROJECT_ID are configured in Vercel."
+        );
+      }
       if (isLocalOrg) {
         setUser(localOrganizerUser);
       } else {
@@ -96,7 +114,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signInEmail = async (email: string, password: string) => {
-    const authInstance = (typeof getFirebaseAuth === "function" ? getFirebaseAuth() : null) || auth;
+    const authInstance = getActiveAuth();
+    if (!authInstance) {
+      throw new Error(
+        "Firebase Auth is not initialized. Please ensure NEXT_PUBLIC_FIREBASE_API_KEY is configured in your Vercel Project Settings."
+      );
+    }
     try {
       await signInWithEmailAndPassword(authInstance, email, password);
     } catch (err: unknown) {
@@ -115,12 +138,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signUpEmail = async (email: string, password: string) => {
-    const authInstance = (typeof getFirebaseAuth === "function" ? getFirebaseAuth() : null) || auth;
+    const authInstance = getActiveAuth();
+    if (!authInstance) {
+      throw new Error(
+        "Firebase Auth is not initialized. Please ensure NEXT_PUBLIC_FIREBASE_API_KEY is configured in your Vercel Project Settings."
+      );
+    }
     await createUserWithEmailAndPassword(authInstance, email, password);
   };
 
   const signInGoogle = async () => {
-    const authInstance = (typeof getFirebaseAuth === "function" ? getFirebaseAuth() : null) || auth;
+    const authInstance = getActiveAuth();
+    if (!authInstance) {
+      throw new Error(
+        "Firebase Auth is not initialized. Please ensure NEXT_PUBLIC_FIREBASE_API_KEY is configured in your Vercel Project Settings."
+      );
+    }
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: "select_account" });
     await signInWithPopup(authInstance, provider);
@@ -176,8 +209,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     useEventStore.getState().clearState();
     try {
-      const authInstance = (typeof getFirebaseAuth === "function" ? getFirebaseAuth() : null) || auth;
-      await signOut(authInstance);
+      const authInstance = getActiveAuth();
+      if (authInstance) {
+        await signOut(authInstance);
+      }
     } catch {
       setUser(null);
     }
@@ -208,6 +243,14 @@ export function useAuth(): AuthContextValue {
 
 // Human-readable Firebase error messages
 export function getAuthErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) {
+    if (
+      error.message.includes("NEXT_PUBLIC_FIREBASE_") ||
+      error.message.includes("Firebase Auth is not initialized")
+    ) {
+      return error.message;
+    }
+  }
   const code = (error as AuthError)?.code ?? "";
   const map: Record<string, string> = {
     "auth/invalid-email": "Please enter a valid email address.",
@@ -229,6 +272,6 @@ export function getAuthErrorMessage(error: unknown): string {
   };
   return (
     map[code] ||
-    "Authentication failed. Please try again."
+    (error instanceof Error ? error.message : "Authentication failed. Please try again.")
   );
 }
