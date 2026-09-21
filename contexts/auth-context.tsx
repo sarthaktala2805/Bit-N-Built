@@ -18,7 +18,12 @@ import {
   signInWithPopup,
   AuthError,
 } from "firebase/auth";
-import { auth, getFirebaseAuth } from "@/lib/firebase";
+import {
+  auth,
+  getFirebaseAuth,
+  isFirebaseConfigured,
+  getFirebaseConfigStatus,
+} from "@/lib/firebase";
 import { useEventStore } from "@/store/event-store";
 
 interface AuthContextValue {
@@ -34,12 +39,15 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 function getActiveAuth(): Auth | null {
-  if (typeof getFirebaseAuth === "function") {
-    const instance = getFirebaseAuth();
-    if (instance) return instance;
+  if (typeof isFirebaseConfigured === "function" && isFirebaseConfigured()) {
+    try {
+      return getFirebaseAuth();
+    } catch {
+      return null;
+    }
   }
-  // Allow test runners with custom mock objects (vi.mock) while avoiding the uninitialized proxy
-  if (auth && !(auth as unknown as { __isProxy?: boolean }).__isProxy) {
+  // Allow test runners with custom mock objects (vi.mock) where isFirebaseConfigured is mocked
+  if (auth && typeof (auth as unknown as { currentUser?: unknown }).currentUser !== "undefined") {
     return auth;
   }
   return null;
@@ -84,9 +92,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const authInstance = getActiveAuth();
     if (!authInstance) {
-      if (process.env.NODE_ENV !== "production") {
+      if (typeof getFirebaseConfigStatus === "function") {
         console.warn(
-          "StageX AI: Firebase Auth is not initialized. Ensure NEXT_PUBLIC_FIREBASE_API_KEY and NEXT_PUBLIC_FIREBASE_PROJECT_ID are configured in Vercel."
+          "StageX AI: Firebase Auth is not initialized. Environment status:",
+          getFirebaseConfigStatus()
         );
       }
       if (isLocalOrg) {

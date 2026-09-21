@@ -1,6 +1,6 @@
 // StageX AI — Firebase Client Singleton
 // Authentication (Email/Password + Google) & Cloud Firestore.
-// No Admin SDK, no server secrets.
+// Direct, robust singleton pattern matching Firebase Web SDK standards.
 
 import { initializeApp, getApps, getApp, FirebaseApp } from "firebase/app";
 import { getAuth, Auth } from "firebase/auth";
@@ -12,40 +12,44 @@ function cleanEnv(val?: string): string | undefined {
   return trimmed === "" ? undefined : trimmed;
 }
 
+export const firebaseConfig = {
+  apiKey: cleanEnv(process.env.NEXT_PUBLIC_FIREBASE_API_KEY),
+  authDomain: cleanEnv(process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN),
+  projectId: cleanEnv(process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID),
+  storageBucket: cleanEnv(process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET),
+  messagingSenderId: cleanEnv(process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID),
+  appId: cleanEnv(process.env.NEXT_PUBLIC_FIREBASE_APP_ID),
+  measurementId: cleanEnv(process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID),
+};
+
 /**
- * Clean Firebase configuration read directly from NEXT_PUBLIC_* variables.
- * Automatically strips quotes and whitespace.
+ * Validates presence of minimum required Firebase public credentials.
+ * Does not expose secret values.
  */
-export function getFirebaseConfig() {
-  return {
-    apiKey: cleanEnv(process.env.NEXT_PUBLIC_FIREBASE_API_KEY),
-    authDomain: cleanEnv(process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN),
-    projectId: cleanEnv(process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID),
-    storageBucket: cleanEnv(process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET),
-    messagingSenderId: cleanEnv(process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID),
-    appId: cleanEnv(process.env.NEXT_PUBLIC_FIREBASE_APP_ID),
-    measurementId: cleanEnv(process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID),
-  };
+export function isFirebaseConfigured(): boolean {
+  return Boolean(firebaseConfig.apiKey && firebaseConfig.projectId);
 }
 
 /**
- * Validates whether the minimum required Firebase configuration is present.
- * Prevents initializing Firebase with undefined/empty credentials during build or SSR.
+ * Diagnostic helper reporting configuration presence as PRESENT or MISSING.
+ * Never prints actual secret values.
  */
-export function isFirebaseConfigured(): boolean {
-  const config = getFirebaseConfig();
-  return Boolean(config.apiKey && config.projectId);
+export function getFirebaseConfigStatus(): Record<string, "PRESENT" | "MISSING"> {
+  return {
+    NEXT_PUBLIC_FIREBASE_API_KEY: firebaseConfig.apiKey ? "PRESENT" : "MISSING",
+    NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: firebaseConfig.authDomain ? "PRESENT" : "MISSING",
+    NEXT_PUBLIC_FIREBASE_PROJECT_ID: firebaseConfig.projectId ? "PRESENT" : "MISSING",
+    NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: firebaseConfig.storageBucket ? "PRESENT" : "MISSING",
+    NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: firebaseConfig.messagingSenderId ? "PRESENT" : "MISSING",
+    NEXT_PUBLIC_FIREBASE_APP_ID: firebaseConfig.appId ? "PRESENT" : "MISSING",
+  };
 }
 
 let cachedApp: FirebaseApp | null = null;
 let cachedAuth: Auth | null = null;
 let cachedDb: Firestore | null = null;
 
-/**
- * Returns the initialized FirebaseApp singleton, or null if configuration is missing.
- * Prevents eager evaluation during Next.js static build / export.
- */
-export function getFirebaseApp(): FirebaseApp | null {
+export function getFirebaseApp(): FirebaseApp {
   if (cachedApp) {
     return cachedApp;
   }
@@ -54,91 +58,40 @@ export function getFirebaseApp(): FirebaseApp | null {
     cachedApp = existingApps[0];
     return cachedApp;
   }
-  const config = getFirebaseConfig();
-  if (!config.apiKey || !config.projectId) {
-    return null;
+  if (!isFirebaseConfigured()) {
+    throw new Error(
+      "Firebase Auth is not initialized. Please ensure NEXT_PUBLIC_FIREBASE_API_KEY is configured."
+    );
   }
-  cachedApp = initializeApp(config);
+  cachedApp = initializeApp(firebaseConfig);
   return cachedApp;
 }
 
-/**
- * Returns the Firebase Auth instance, or null if Firebase is not configured.
- * Safely avoids initializing Auth during build/SSR.
- */
-export function getFirebaseAuth(): Auth | null {
+export function getFirebaseAuth(): Auth {
   if (cachedAuth) {
     return cachedAuth;
   }
   const appInstance = getFirebaseApp();
-  if (!appInstance) {
-    return null;
-  }
   cachedAuth = getAuth(appInstance);
   return cachedAuth;
 }
 
-/**
- * Returns the Cloud Firestore instance, or null if Firebase is not configured.
- */
-export function getFirebaseDb(): Firestore | null {
+export function getFirebaseFirestore(): Firestore {
   if (cachedDb) {
     return cachedDb;
   }
   const appInstance = getFirebaseApp();
-  if (!appInstance) {
-    return null;
-  }
   cachedDb = getFirestore(appInstance);
   return cachedDb;
 }
 
-// Backwards-compatible Proxied exports for existing imports and test mocks.
-// Property accesses during build or without credentials safely return undefined without crashing.
-export const app: FirebaseApp = new Proxy({} as FirebaseApp, {
-  get(target, prop, receiver) {
-    if (prop === "__isProxy") return true;
-    const instance = getFirebaseApp();
-    if (!instance) {
-      if (typeof window === "undefined") return undefined;
-      throw new Error(
-        "Firebase App is not initialized. Please ensure NEXT_PUBLIC_FIREBASE_API_KEY and NEXT_PUBLIC_FIREBASE_PROJECT_ID are configured."
-      );
-    }
-    const val = Reflect.get(instance, prop, receiver);
-    return typeof val === "function" ? val.bind(instance) : val;
-  },
-});
+export const getFirebaseDb = getFirebaseFirestore;
 
-export const auth: Auth = new Proxy({} as Auth, {
-  get(target, prop, receiver) {
-    if (prop === "__isProxy") return true;
-    const instance = getFirebaseAuth();
-    if (!instance) {
-      if (typeof window === "undefined") return undefined;
-      throw new Error(
-        "Firebase Auth is not initialized. Please ensure NEXT_PUBLIC_FIREBASE_API_KEY is configured."
-      );
-    }
-    const val = Reflect.get(instance, prop, receiver);
-    return typeof val === "function" ? val.bind(instance) : val;
-  },
-});
-
-export const db: Firestore = new Proxy(Object.create(Firestore.prototype), {
-  get(target, prop, receiver) {
-    if (prop === "__isProxy") return true;
-    const instance = getFirebaseDb();
-    if (!instance) {
-      if (typeof window === "undefined") return undefined;
-      throw new Error(
-        "Cloud Firestore is not initialized. Please ensure NEXT_PUBLIC_FIREBASE_PROJECT_ID is configured."
-      );
-    }
-    const val = Reflect.get(instance, prop, receiver);
-    return typeof val === "function" ? val.bind(instance) : val;
-  },
-});
-
+// Robust singletons initialized when configuration is present.
+// When unconfigured during build prerender, values are undefined and guarded by isFirebaseConfigured().
+export const app: FirebaseApp = (isFirebaseConfigured() ? getFirebaseApp() : undefined) as unknown as FirebaseApp;
+export const auth: Auth = (isFirebaseConfigured() ? getFirebaseAuth() : undefined) as unknown as Auth;
+export const db: Firestore = (isFirebaseConfigured() ? getFirebaseFirestore() : undefined) as unknown as Firestore;
 export const firestore: Firestore = db;
+
 
