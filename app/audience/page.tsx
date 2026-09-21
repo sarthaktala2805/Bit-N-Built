@@ -28,7 +28,7 @@ import {
 } from "lucide-react";
 import { useEventStore } from "@/store/event-store";
 import { Event, EventResource } from "@/types";
-import { findEventByAccessCode, PublicEventBundle } from "@/lib/events-registry";
+import { findEventByAccessCode, findEventByAccessCodeAsync, PublicEventBundle } from "@/lib/events-registry";
 import { getMediaObjectUrl } from "@/lib/media-storage";
 
 function getEmbedUrl(rawUrl: string): string | null {
@@ -252,6 +252,12 @@ function AudiencePortalContent() {
   const [copiedEventCode, setCopiedEventCode] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  const [matchedBundle, setMatchedBundle] = useState<PublicEventBundle | null>(() => {
+    if (!codeParam) return null;
+    return findEventByAccessCode(codeParam, events, sessions, speakers);
+  });
+  const [isSearchingCode, setIsSearchingCode] = useState(false);
+
   // Auto-hydrate
   useEffect(() => {
     if (!hydrated) {
@@ -259,17 +265,48 @@ function AudiencePortalContent() {
     }
   }, [hydrated, hydrate]);
 
-  // Sync input when codeParam changes
+  // Sync input when codeParam changes and resolve event bundle across devices/accounts
   useEffect(() => {
     if (codeParam) {
       setInputCode(codeParam);
     }
-  }, [codeParam]);
 
-  // Resolve matching event bundle via multi-source registry
-  const matchedBundle: PublicEventBundle | null = useMemo(() => {
-    if (!codeParam) return null;
-    return findEventByAccessCode(codeParam, events, sessions, speakers);
+    if (!codeParam) {
+      setMatchedBundle(null);
+      setIsSearchingCode(false);
+      return;
+    }
+
+    // 1. Immediate check from local in-memory store and localStorage
+    const local = findEventByAccessCode(codeParam, events, sessions, speakers);
+    if (local) {
+      setMatchedBundle(local);
+      setIsSearchingCode(false);
+      return;
+    }
+
+    // 2. Asynchronous query to Cloud Firestore and Server API
+    let active = true;
+    setIsSearchingCode(true);
+
+    findEventByAccessCodeAsync(codeParam, events, sessions, speakers)
+      .then((res) => {
+        if (active) {
+          setMatchedBundle(res);
+          setIsSearchingCode(false);
+        }
+      })
+      .catch((err) => {
+        console.warn("[Audience Lookup Error]:", err);
+        if (active) {
+          setMatchedBundle(null);
+          setIsSearchingCode(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
   }, [codeParam, events, sessions, speakers]);
 
   const currentEvent = matchedBundle?.event || null;
@@ -306,8 +343,8 @@ function AudiencePortalContent() {
     setTimeout(() => setCopiedScriptId(null), 2000);
   };
 
-  // Has code parameter in URL, but NO event matched: explicit 404
-  const isCodeNotFound = Boolean(codeParam && !currentEvent);
+  // Has code parameter in URL, search completed, but NO event matched: explicit 404
+  const isCodeNotFound = Boolean(codeParam && !isSearchingCode && !currentEvent);
 
   return (
     <div className="min-h-screen bg-[#070B14] text-slate-100 flex flex-col selection:bg-amber-500 selection:text-black">
@@ -356,7 +393,24 @@ function AudiencePortalContent() {
 
       {/* Main Body */}
       <main className="flex-1 max-w-6xl w-full mx-auto p-4 sm:p-6 md:p-8">
-        {isCodeNotFound ? (
+        {isSearchingCode ? (
+          /* Connecting to Cloud Registry */
+          <div className="max-w-md mx-auto mt-16 sm:mt-24 text-center space-y-4">
+            <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center mx-auto text-amber-400 shadow-xl shadow-amber-950/40">
+              <div className="w-6 h-6 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold text-white tracking-tight">Connecting to Event Portal…</h2>
+              <p className="text-xs text-slate-400 mt-1">
+                Searching event code{" "}
+                <span className="font-mono text-amber-300 font-bold px-1.5 py-0.5 bg-amber-500/10 rounded">
+                  {codeParam}
+                </span>{" "}
+                in cloud registry…
+              </p>
+            </div>
+          </div>
+        ) : isCodeNotFound ? (
           /* Explicit Wrong Code / 404 Screen */
           <div className="max-w-md mx-auto mt-12 sm:mt-20 text-center space-y-6">
             <div className="w-16 h-16 rounded-2xl bg-red-500/10 border border-red-500/30 flex items-center justify-center mx-auto text-red-400 shadow-xl shadow-red-950/40">

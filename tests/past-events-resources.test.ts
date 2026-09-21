@@ -23,7 +23,7 @@ vi.mock("firebase/firestore", () => ({
 }));
 
 import { useEventStore, generateAccessCode } from "@/store/event-store";
-import { findEventByAccessCode, registerPublicEvent } from "@/lib/events-registry";
+import { findEventByAccessCode, findEventByAccessCodeAsync, registerPublicEvent, unregisterPublicEvent } from "@/lib/events-registry";
 
 describe("Past Events, Resources & Audience Access Code System", () => {
   beforeEach(() => {
@@ -225,6 +225,33 @@ describe("Past Events, Resources & Audience Access Code System", () => {
 
     const shortCode = findEventByAccessCode("ABC", useEventStore.getState().events);
     expect(shortCode).toBeNull();
+  });
+
+  it("findEventByAccessCodeAsync resolves valid code asynchronously and unregisters on delete", async () => {
+    const res = useEventStore.getState().createEvent({
+      name: "Global Tech Summit",
+      type: "Conference",
+      startDate: "2026-11-01",
+      endDate: "2026-11-02",
+      date: "2026-11-01",
+      startTime: "10:00",
+      endTime: "18:00",
+      venue: "Convention Center",
+    });
+    const ev = useEventStore.getState().events.find((e) => e.id === res.eventId)!;
+    const code = ev.accessCode!;
+
+    // 1. Resolves asynchronously across sessions
+    const asyncFound = await findEventByAccessCodeAsync(code, useEventStore.getState().events);
+    expect(asyncFound).not.toBeNull();
+    expect(asyncFound?.event.name).toBe("Global Tech Summit");
+
+    // 2. Unregister public event
+    unregisterPublicEvent(code);
+    useEventStore.getState().clearState();
+
+    const afterUnregister = await findEventByAccessCodeAsync(code, []);
+    expect(afterUnregister).toBeNull();
   });
 
   it("strictly prevents restarting an archived event via startLiveEvent", () => {

@@ -97,7 +97,7 @@ import {
   updateAIConversationInFirestore,
   deleteAIConversationInFirestore,
 } from "@/lib/firestore/ai-conversations";
-import { registerPublicEvent } from "@/lib/events-registry";
+import { registerPublicEvent, unregisterPublicEvent } from "@/lib/events-registry";
 
 export interface EventStoreState {
   events: Event[];
@@ -492,6 +492,13 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
               };
               saveToStorage({ ...s, ...updated });
               return updated;
+            });
+
+            // Automatically sync all cloud events to public directory for cross-device audience discovery
+            cloudEvents.forEach((ev) => {
+              const evSessions = normalizedCloudSessions.filter((s) => s.eventId === ev.id);
+              const evSpeakers = allCloudSpeakers.filter((s) => s.eventId === ev.id);
+              registerPublicEvent(ev, evSessions, evSpeakers);
             });
           }
         })
@@ -1203,6 +1210,13 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
       return updated;
     });
 
+    // Re-register in public directory for audience discovery
+    registerPublicEvent(
+      updatedEvent,
+      get().sessions.filter((s) => s.eventId === id),
+      get().speakers.filter((s) => s.eventId === id)
+    );
+
     // Asynchronously update Cloud Firestore
     const uid = get().activeUserId;
     if (uid) {
@@ -1220,6 +1234,10 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
   deleteEvent: (id) => {
     const event = get().events.find((e) => e.id === id);
     if (!event) return { ok: false, error: "Event not found." };
+
+    if (event.accessCode) {
+      unregisterPublicEvent(event.accessCode);
+    }
 
     set((state) => {
       // Cascade delete everything related to this event
@@ -1492,6 +1510,15 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
       return updated;
     });
 
+    const parentEventForSpeaker = get().events.find((e) => e.id === data.eventId);
+    if (parentEventForSpeaker) {
+      registerPublicEvent(
+        parentEventForSpeaker,
+        get().sessions.filter((s) => s.eventId === data.eventId),
+        get().speakers.filter((s) => s.eventId === data.eventId)
+      );
+    }
+
     // Asynchronously write to Cloud Firestore
     const uid = get().activeUserId;
     if (uid) {
@@ -1652,6 +1679,12 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
       saveToStorage({ ...state, ...updated });
       return updated;
     });
+
+    registerPublicEvent(
+      event,
+      get().sessions.filter((s) => s.eventId === data.eventId),
+      get().speakers.filter((s) => s.eventId === data.eventId)
+    );
 
     // Asynchronously write to Cloud Firestore
     const uid = get().activeUserId;

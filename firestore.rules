@@ -11,10 +11,17 @@ service cloud.firestore {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
 
-    // Default deny all access to any document outside the defined user schema
+    // Public Audience Events Directory:
+    // Anyone (including unauthenticated attendees) can read event records by their 6-character access code.
+    // Organizers can publish and update public events.
+    match /public_events/{accessCode} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Default deny all access to any document outside the defined schemas
     match /{document=**} {
       allow read, write: if false;
     }
   }
 }
-
