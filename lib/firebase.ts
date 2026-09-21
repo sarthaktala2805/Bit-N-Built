@@ -1,6 +1,7 @@
 // StageX AI — Firebase Client Singleton
 // Authentication (Email/Password + Google) & Cloud Firestore.
 // Direct, robust singleton pattern matching Firebase Web SDK standards.
+// Kept strictly on Firebase Spark (Free Tier) with no Firebase Storage dependency.
 
 import { initializeApp, getApps, getApp, FirebaseApp } from "firebase/app";
 import { getAuth, Auth } from "firebase/auth";
@@ -89,6 +90,3 @@ export const app: FirebaseApp = safeApp as FirebaseApp;
 export const auth: Auth = safeAuth as Auth;
 export const db: Firestore = safeDb as Firestore;
 export const firestore: Firestore = db;
-
-
-

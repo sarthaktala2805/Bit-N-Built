@@ -13,7 +13,7 @@ export type EventType =
 
 export type EventStatus = "Scheduled" | "Live" | "Completed" | "Cancelled";
 
-export type EventResourceType = "video" | "ppt" | "script" | "document";
+export type EventResourceType = "video" | "ppt" | "script" | "document" | "image";
 
 export interface EventResource {
   id: string;
@@ -27,7 +27,10 @@ export interface EventResource {
   fileName?: string;
   fileSize?: number;
   fileMimeType?: string;
+  storagePath?: string | null; // Firebase Storage object path
 }
+
+
 
 export interface Event {
   id: string;

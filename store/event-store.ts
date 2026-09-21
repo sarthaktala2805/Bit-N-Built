@@ -1385,6 +1385,7 @@ export const useEventStore = create<EventStoreState>((set, get) => ({
       fileName: resource.fileName,
       fileSize: resource.fileSize,
       fileMimeType: resource.fileMimeType,
+      storagePath: resource.storagePath || null,
     };
 
     const updatedResources = [...(event.resources || []), newResource];

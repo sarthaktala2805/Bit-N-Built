@@ -21,10 +21,14 @@ import {
   Smartphone,
   HardDrive,
   FileUp,
+  Image as ImageIcon,
+  RefreshCw,
 } from "lucide-react";
 import { Event, EventResource, EventResourceType } from "@/types";
 import { useEventStore } from "@/store/event-store";
-import { saveMediaFile, deleteMediaFile } from "@/lib/media-storage";
+import { deleteMediaFile } from "@/lib/media-storage";
+import { uploadEventResourceFile, deleteEventResourceFile } from "@/lib/resource-storage";
+
 
 interface PastEventResourcesModalProps {
   event: Event;
@@ -54,6 +58,7 @@ export const PastEventResourcesModal: React.FC<PastEventResourcesModalProps> = (
   const [author, setAuthor] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -109,21 +114,28 @@ export const PastEventResourcesModal: React.FC<PastEventResourcesModalProps> = (
           return;
         }
 
-        const resId = "file_" + Math.random().toString(36).substring(2, 9) + Date.now().toString(36);
+        setUploadProgress(0);
 
-        // Save heavy media into IndexedDB so localStorage quota is not exceeded
-        await saveMediaFile(resId, selectedFile);
+        const uploadResult = await uploadEventResourceFile({
+          eventId: event.id,
+          eventCode: event.accessCode || "GENERAL",
+          file: selectedFile,
+          resourceType: type,
+          ownerUserId: event.ownerUserId,
+          onProgress: (pct) => setUploadProgress(pct),
+        });
 
         const res = addEventResource(event.id, {
-          type,
+          type: uploadResult.type,
           title: title.trim(),
-          url: resId, // points to stored IndexedDB key
+          url: uploadResult.url,
+          storagePath: uploadResult.storagePath,
           description: description.trim() || undefined,
           author: author.trim() || undefined,
-          isLocalFile: true,
-          fileName: selectedFile.name,
-          fileSize: selectedFile.size,
-          fileMimeType: selectedFile.type,
+          isLocalFile: uploadResult.isLocalFile,
+          fileName: uploadResult.fileName,
+          fileSize: uploadResult.fileSize,
+          fileMimeType: uploadResult.fileMimeType,
         });
 
         if (!res.ok) {
@@ -157,15 +169,20 @@ export const PastEventResourcesModal: React.FC<PastEventResourcesModalProps> = (
       setSelectedFile(null);
       setDescription("");
       setAuthor("");
+      setUploadProgress(null);
       setShowAddForm(false);
     } catch (err: unknown) {
       setFormError((err as Error)?.message || "Failed to attach resource.");
     } finally {
       setIsSubmitting(false);
+      setUploadProgress(null);
     }
   };
 
   const handleDeleteResource = async (resource: EventResource) => {
+    if (resource.storagePath) {
+      await deleteEventResourceFile(resource.storagePath);
+    }
     if (resource.isLocalFile) {
       await deleteMediaFile(resource.url);
     }
@@ -186,6 +203,8 @@ export const PastEventResourcesModal: React.FC<PastEventResourcesModalProps> = (
         return <Presentation className="w-4 h-4 text-amber-400" />;
       case "script":
         return <FileCode className="w-4 h-4 text-emerald-400" />;
+      case "image":
+        return <ImageIcon className="w-4 h-4 text-purple-400" />;
       default:
         return <FileText className="w-4 h-4 text-blue-400" />;
     }
@@ -199,6 +218,8 @@ export const PastEventResourcesModal: React.FC<PastEventResourcesModalProps> = (
         return "bg-amber-500/10 text-amber-300 border-amber-500/30";
       case "script":
         return "bg-emerald-500/10 text-emerald-300 border-emerald-500/30";
+      case "image":
+        return "bg-purple-500/10 text-purple-300 border-purple-500/30";
       default:
         return "bg-blue-500/10 text-blue-300 border-blue-500/30";
     }
@@ -219,6 +240,10 @@ export const PastEventResourcesModal: React.FC<PastEventResourcesModalProps> = (
         return ".ppt,.pptx,.pdf,.key,.odp";
       case "script":
         return ".txt,.pdf,.doc,.docx,.md";
+      case "image":
+        return "image/*,.jpg,.jpeg,.png,.webp,.gif,.svg";
+      case "document":
+        return ".pdf,.doc,.docx,.txt,.rtf,.odt";
       default:
         return "*/*";
     }
@@ -299,12 +324,14 @@ export const PastEventResourcesModal: React.FC<PastEventResourcesModalProps> = (
           {/* Controls Bar */}
           <div className="flex flex-wrap items-center justify-between gap-3">
             {/* Filter Tabs */}
-            <div className="flex items-center gap-1 bg-slate-800/80 p-1 rounded-xl border border-slate-700/60 text-xs">
+            <div className="flex flex-wrap items-center gap-1 bg-slate-800/80 p-1 rounded-xl border border-slate-700/60 text-xs">
               {(
                 [
                   { id: "all", label: `All (${resources.length})` },
                   { id: "video", label: `Videos (${resources.filter((r) => r.type === "video").length})` },
                   { id: "ppt", label: `PPT & Slides (${resources.filter((r) => r.type === "ppt").length})` },
+                  { id: "document", label: `Docs & PDFs (${resources.filter((r) => r.type === "document").length})` },
+                  { id: "image", label: `Photos (${resources.filter((r) => r.type === "image").length})` },
                   { id: "script", label: `Scripts (${resources.filter((r) => r.type === "script").length})` },
                 ] as const
               ).map((tab) => (
@@ -401,8 +428,9 @@ export const PastEventResourcesModal: React.FC<PastEventResourcesModalProps> = (
                   >
                     <option value="video">🎥 Video Recording</option>
                     <option value="ppt">📊 Presentation / PPT Slides</option>
+                    <option value="document">📄 Document / PDF / Word / TXT</option>
+                    <option value="image">🖼️ Photo / Image / Banner</option>
                     <option value="script">📜 Event Script / Notes</option>
-                    <option value="document">📄 Document / PDF</option>
                   </select>
                 </div>
 
@@ -526,9 +554,26 @@ export const PastEventResourcesModal: React.FC<PastEventResourcesModalProps> = (
                     className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white focus:outline-none focus:border-blue-500"
                   />
                 </div>
+
+                {/* Upload Progress Bar */}
+                {uploadProgress !== null && (
+                  <div className="sm:col-span-2 space-y-1.5 p-3 rounded-xl bg-slate-900/90 border border-emerald-500/30">
+                    <div className="flex justify-between text-[11px] text-emerald-400 font-semibold">
+                      <span>Uploading file to cloud storage...</span>
+                      <span>{uploadProgress}%</span>
+                    </div>
+                    <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-300"
+                        style={{ width: `${uploadProgress}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="flex justify-end gap-2 pt-2 border-t border-slate-700/60">
+
                 <button
                   type="button"
                   onClick={() => setShowAddForm(false)}
@@ -590,11 +635,16 @@ export const PastEventResourcesModal: React.FC<PastEventResourcesModalProps> = (
                         >
                           {res.type}
                         </span>
-                        {res.isLocalFile && (
+                        {res.storagePath ? (
                           <span className="px-2 py-0.5 text-[10px] font-medium bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 rounded-md">
-                            Device Upload {res.fileSize ? `(${formatFileSize(res.fileSize)})` : ""}
+                            Cloud Stored {res.fileSize ? `(${formatFileSize(res.fileSize)})` : ""}
                           </span>
-                        )}
+                        ) : res.isLocalFile ? (
+                          <span className="px-2 py-0.5 text-[10px] font-medium bg-amber-500/10 text-amber-300 border border-amber-500/20 rounded-md flex items-center gap-1">
+                            <RefreshCw className="w-3 h-3" />
+                            File needs to be re-uploaded
+                          </span>
+                        ) : null}
                         {res.author && (
                           <span className="text-[11px] text-slate-400">by {res.author}</span>
                         )}
@@ -608,10 +658,19 @@ export const PastEventResourcesModal: React.FC<PastEventResourcesModalProps> = (
 
                       <div className="flex items-center gap-3 mt-2 text-[11px] text-slate-500">
                         <span>Added {new Date(res.uploadedAt).toLocaleDateString()}</span>
-                        {res.isLocalFile ? (
-                          <span className="text-emerald-400 truncate max-w-xs">
-                            Stored on device: {res.fileName}
-                          </span>
+                        {res.isLocalFile && !res.storagePath ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowAddForm(true);
+                              setTitle(res.title);
+                              setType(res.type);
+                              setUploadMode("device");
+                            }}
+                            className="text-amber-400 hover:text-amber-300 underline font-medium flex items-center gap-1"
+                          >
+                            [Re-upload]
+                          </button>
                         ) : (
                           <a
                             href={res.url}
@@ -620,7 +679,7 @@ export const PastEventResourcesModal: React.FC<PastEventResourcesModalProps> = (
                             className="flex items-center gap-1 text-blue-400 hover:text-blue-300 transition truncate max-w-xs"
                           >
                             <ExternalLink className="w-3 h-3 flex-shrink-0" />
-                            <span className="truncate">{res.url}</span>
+                            <span className="truncate">{res.fileName || res.url}</span>
                           </a>
                         )}
                       </div>

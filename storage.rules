@@ -1,0 +1,14 @@
+rules_version = '2';
+
+// StageX AI — Firebase Storage Rules (DISABLED / DEPRECATED)
+// Storage for binary files has been migrated to Supabase Storage (stagex-resources bucket).
+// Firebase remains strictly on Spark (Free) plan without Firebase Storage dependency.
+// All arbitrary writes/reads to Firebase Storage bucket are denied by default.
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

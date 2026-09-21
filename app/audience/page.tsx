@@ -26,6 +26,8 @@ import {
   AlertTriangle,
   RotateCcw,
   Share2,
+  AlertCircle,
+  Image as ImageIcon,
 } from "lucide-react";
 import { useEventStore } from "@/store/event-store";
 import { Event, EventResource } from "@/types";
@@ -33,6 +35,8 @@ import { findEventByAccessCode, findEventByAccessCodeAsync, PublicEventBundle } 
 import { validateEventCode, normalizeEventCode } from "@/lib/event-code";
 import { startAudiencePresence, subscribeActiveAttendeeCount } from "@/lib/audience-presence";
 import { getMediaObjectUrl } from "@/lib/media-storage";
+import { canBrowserPreview } from "@/lib/resource-storage";
+
 
 function getEmbedUrl(rawUrl: string): string | null {
   try {
@@ -63,15 +67,30 @@ function getEmbedUrl(rawUrl: string): string | null {
   }
 }
 
+function formatResourceSize(bytes?: number): string {
+  if (!bytes || bytes <= 0) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function getDownloadLink(resource: EventResource, eventCode: string, download = true): string {
+  if (eventCode && resource.id) {
+    return `/api/events/resources/download?code=${encodeURIComponent(eventCode)}&id=${encodeURIComponent(resource.id)}${download ? "&download=1" : "&inline=1"}`;
+  }
+  return resource.url;
+}
+
 /**
- * Component to play local device videos or external embeds
+ * Component to play local/cloud videos or external YouTube streams
  */
-function AudienceVideoItem({ resource }: { resource: EventResource }) {
+function AudienceVideoItem({ resource, eventCode }: { resource: EventResource; eventCode: string }) {
   const [localBlobUrl, setLocalBlobUrl] = useState<string | null>(null);
+  const [hasError, setHasError] = useState(false);
 
   useEffect(() => {
     let active = true;
-    if (resource.isLocalFile) {
+    if (resource.isLocalFile && !resource.url.startsWith("http")) {
       getMediaObjectUrl(resource.url).then((url) => {
         if (active && url) setLocalBlobUrl(url);
       });
@@ -82,25 +101,18 @@ function AudienceVideoItem({ resource }: { resource: EventResource }) {
   }, [resource]);
 
   const embedUrl = !resource.isLocalFile ? getEmbedUrl(resource.url) : null;
+  const isDirectVideo = !embedUrl;
+  const videoSrc = localBlobUrl || resource.url;
+  const downloadUrl = getDownloadLink(resource, eventCode, true);
 
   return (
     <div className="rounded-2xl overflow-hidden bg-slate-900/80 border border-slate-800 shadow-xl flex flex-col">
-      {resource.isLocalFile ? (
-        localBlobUrl ? (
-          <div className="relative aspect-video w-full bg-black">
-            <video
-              src={localBlobUrl}
-              controls
-              className="w-full h-full object-contain bg-black"
-              preload="metadata"
-            />
-          </div>
-        ) : (
-          <div className="aspect-video w-full bg-slate-950 flex flex-col items-center justify-center p-6 text-center border-b border-slate-800">
-            <div className="w-8 h-8 border-2 border-rose-500 border-t-transparent rounded-full animate-spin mb-2" />
-            <span className="text-xs text-slate-400">Loading video from device storage...</span>
-          </div>
-        )
+      {hasError ? (
+        <div className="aspect-video w-full bg-slate-950 flex flex-col items-center justify-center p-6 text-center border-b border-slate-800">
+          <AlertCircle className="w-8 h-8 text-rose-400 mb-2" />
+          <span className="text-xs font-semibold text-rose-300">File is currently unavailable.</span>
+          <span className="text-[11px] text-slate-500 mt-1">Please check back later or contact the event host.</span>
+        </div>
       ) : embedUrl ? (
         <div className="relative aspect-video w-full bg-black">
           <iframe
@@ -109,6 +121,16 @@ function AudienceVideoItem({ resource }: { resource: EventResource }) {
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
             allowFullScreen
             className="w-full h-full border-0"
+          />
+        </div>
+      ) : isDirectVideo ? (
+        <div className="relative aspect-video w-full bg-black">
+          <video
+            src={videoSrc}
+            controls
+            preload="metadata"
+            onError={() => setHasError(true)}
+            className="w-full h-full object-contain bg-black"
           />
         </div>
       ) : (
@@ -133,32 +155,33 @@ function AudienceVideoItem({ resource }: { resource: EventResource }) {
           )}
         </div>
 
-        <div className="flex items-center justify-between pt-4 mt-4 border-t border-slate-800/80">
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-4 mt-4 border-t border-slate-800/80">
           <span className="text-[11px] text-slate-500">
-            {resource.fileName
-              ? `File: ${resource.fileName}`
-              : new Date(resource.uploadedAt).toLocaleDateString()}
+            {resource.fileName ? resource.fileName : "Video Recording"}
+            {resource.fileSize ? ` · ${formatResourceSize(resource.fileSize)}` : ""}
           </span>
-          {resource.isLocalFile && localBlobUrl ? (
-            <a
-              href={localBlobUrl}
-              download={resource.fileName || `${resource.title}.mp4`}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white transition shadow-sm"
-            >
-              <Download className="w-3.5 h-3.5" />
-              Download Video
-            </a>
-          ) : !resource.isLocalFile ? (
-            <a
-              href={resource.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white transition shadow-sm"
-            >
-              Watch Fullscreen
-              <ExternalLink className="w-3.5 h-3.5" />
-            </a>
-          ) : null}
+          <div className="flex items-center gap-2">
+            {embedUrl ? (
+              <a
+                href={resource.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white transition shadow-sm"
+              >
+                Watch on YouTube
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+            ) : (
+              <a
+                href={downloadUrl}
+                download={resource.fileName || `${resource.title}.mp4`}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white transition shadow-sm"
+              >
+                <Download className="w-3.5 h-3.5" />
+                Download Video
+              </a>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -168,22 +191,10 @@ function AudienceVideoItem({ resource }: { resource: EventResource }) {
 /**
  * Component to open/download PPT slides
  */
-function AudienceSlideItem({ resource }: { resource: EventResource }) {
-  const [localBlobUrl, setLocalBlobUrl] = useState<string | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    if (resource.isLocalFile) {
-      getMediaObjectUrl(resource.url).then((url) => {
-        if (active && url) setLocalBlobUrl(url);
-      });
-    }
-    return () => {
-      active = false;
-    };
-  }, [resource]);
-
+function AudienceSlideItem({ resource, eventCode }: { resource: EventResource; eventCode: string }) {
   const embedUrl = !resource.isLocalFile ? getEmbedUrl(resource.url) : null;
+  const isWebUrl = resource.url.startsWith("http") && !resource.storagePath && !resource.fileName;
+  const downloadUrl = getDownloadLink(resource, eventCode, true);
 
   return (
     <div className="p-5 rounded-2xl bg-slate-900/80 border border-slate-800 shadow-xl flex flex-col justify-between">
@@ -210,37 +221,170 @@ function AudienceSlideItem({ resource }: { resource: EventResource }) {
         )}
       </div>
 
-      <div className="flex items-center justify-between pt-4 mt-4 border-t border-slate-800/80">
+      <div className="flex flex-wrap items-center justify-between gap-2 pt-4 mt-4 border-t border-slate-800/80">
         <span className="text-[11px] text-slate-500">
-          {resource.fileName
-            ? `File: ${resource.fileName}`
-            : new Date(resource.uploadedAt).toLocaleDateString()}
+          {resource.fileName || "Presentation Deck"}
+          {resource.fileSize ? ` · ${formatResourceSize(resource.fileSize)}` : ""}
         </span>
 
-        {resource.isLocalFile && localBlobUrl ? (
-          <a
-            href={localBlobUrl}
-            download={resource.fileName || `${resource.title}.pdf`}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold transition shadow-sm"
-          >
-            <Download className="w-3.5 h-3.5" />
-            Download Slides / PPT
-          </a>
-        ) : !resource.isLocalFile ? (
+        {isWebUrl ? (
           <a
             href={resource.url}
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold transition shadow-sm"
           >
-            Open Slides / PPT
+            Open Presentation Link
             <ExternalLink className="w-3.5 h-3.5" />
           </a>
-        ) : null}
+        ) : (
+          <a
+            href={downloadUrl}
+            download={resource.fileName || `${resource.title}.pptx`}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold transition shadow-sm"
+          >
+            <Download className="w-3.5 h-3.5" />
+            Download Slides / PPT
+          </a>
+        )}
       </div>
     </div>
   );
 }
+
+/**
+ * Component to open/download PDF, Word, and text documents
+ */
+function AudienceDocumentItem({ resource, eventCode }: { resource: EventResource; eventCode: string }) {
+  const isPdf = Boolean(resource.fileName && /\.pdf$/i.test(resource.fileName)) || resource.fileMimeType === "application/pdf";
+  const isTxt = Boolean(resource.fileName && /\.(txt|md|csv)$/i.test(resource.fileName)) || resource.fileMimeType?.startsWith("text/");
+  const canPreview = isPdf || isTxt;
+
+  const openUrl = getDownloadLink(resource, eventCode, false);
+  const downloadUrl = getDownloadLink(resource, eventCode, true);
+
+  return (
+    <div className="p-5 rounded-2xl bg-slate-900/80 border border-slate-800 shadow-xl flex flex-col justify-between">
+      <div>
+        <div className="flex items-center gap-2 mb-2">
+          <div className="p-2 rounded-lg bg-blue-500/10 text-blue-400">
+            <FileText className="w-4 h-4" />
+          </div>
+          <h3 className="text-base font-bold text-white">{resource.title}</h3>
+        </div>
+
+        {resource.author && (
+          <p className="text-xs text-blue-300/80 mb-2">Author: {resource.author}</p>
+        )}
+
+        {resource.description && (
+          <p className="text-xs text-slate-400 leading-relaxed mb-2">{resource.description}</p>
+        )}
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-2 pt-4 mt-4 border-t border-slate-800/80">
+        <span className="text-[11px] text-slate-500">
+          {resource.fileName || "Document File"}
+          {resource.fileSize ? ` · ${formatResourceSize(resource.fileSize)}` : ""}
+        </span>
+
+        <div className="flex items-center gap-2">
+          {canPreview && (
+            <a
+              href={openUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 transition border border-slate-700"
+            >
+              Open in Browser
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+          )}
+          <a
+            href={downloadUrl}
+            download={resource.fileName || `${resource.title}`}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white transition shadow-sm"
+          >
+            <Download className="w-3.5 h-3.5" />
+            Download File
+          </a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Component to view/download event photos and images
+ */
+function AudienceImageItem({ resource, eventCode }: { resource: EventResource; eventCode: string }) {
+  const [hasError, setHasError] = useState(false);
+  const openUrl = getDownloadLink(resource, eventCode, false);
+  const downloadUrl = getDownloadLink(resource, eventCode, true);
+  const imageSrc = resource.url.startsWith("http") ? resource.url : openUrl;
+
+  return (
+    <div className="rounded-2xl overflow-hidden bg-slate-900/80 border border-slate-800 shadow-xl flex flex-col justify-between">
+      <div>
+        {hasError ? (
+          <div className="aspect-video w-full bg-slate-950 flex flex-col items-center justify-center p-6 text-center border-b border-slate-800">
+            <AlertCircle className="w-8 h-8 text-rose-400 mb-2" />
+            <span className="text-xs font-semibold text-rose-300">Image is currently unavailable.</span>
+          </div>
+        ) : (
+          <div className="relative aspect-video w-full bg-black/60 overflow-hidden group">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={imageSrc}
+              alt={resource.title}
+              onError={() => setHasError(true)}
+              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+            />
+          </div>
+        )}
+
+        <div className="p-4">
+          <div className="flex items-center gap-2 mb-1">
+            <div className="p-1.5 rounded-lg bg-purple-500/10 text-purple-400">
+              <ImageIcon className="w-3.5 h-3.5" />
+            </div>
+            <h3 className="text-sm font-bold text-white truncate">{resource.title}</h3>
+          </div>
+          {resource.description && (
+            <p className="text-xs text-slate-400 line-clamp-2 mt-1">{resource.description}</p>
+          )}
+        </div>
+      </div>
+
+      <div className="p-4 pt-0 flex flex-wrap items-center justify-between gap-2 border-t border-slate-800/80 mt-2">
+        <span className="text-[11px] text-slate-500">
+          {resource.fileName || "Photo"}
+          {resource.fileSize ? ` · ${formatResourceSize(resource.fileSize)}` : ""}
+        </span>
+        <div className="flex items-center gap-2">
+          <a
+            href={openUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
+          >
+            Open Full
+            <ExternalLink className="w-3 h-3" />
+          </a>
+          <a
+            href={downloadUrl}
+            download={resource.fileName || `${resource.title}.jpg`}
+            className="flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-semibold bg-purple-600 hover:bg-purple-500 text-white transition shadow-sm"
+          >
+            <Download className="w-3 h-3" />
+            Download
+          </a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 function AudiencePortalContent() {
   const router = useRouter();
@@ -252,7 +396,7 @@ function AudiencePortalContent() {
   const { events, sessions, speakers, hydrated, hydrate } = useEventStore();
 
   const [inputCode, setInputCode] = useState(codeParam);
-  const [activeTab, setActiveTab] = useState<"videos" | "slides" | "scripts" | "schedule">("videos");
+  const [activeTab, setActiveTab] = useState<"all" | "videos" | "slides" | "docs" | "photos" | "scripts" | "schedule">("all");
   const [copiedScriptId, setCopiedScriptId] = useState<string | null>(null);
   const [copiedEventCode, setCopiedEventCode] = useState(false);
   const [copiedShareLink, setCopiedShareLink] = useState(false);
@@ -342,7 +486,15 @@ function AudiencePortalContent() {
 
   const resources = currentEvent?.resources || [];
   const videoResources = resources.filter((r) => r.type === "video");
-  const pptResources = resources.filter((r) => r.type === "ppt" || r.type === "document");
+  const pptResources = resources.filter(
+    (r) => r.type === "ppt" || (r.fileName && /\.(ppt|pptx|odp|key)$/i.test(r.fileName))
+  );
+  const docResources = resources.filter(
+    (r) => r.type === "document" || (r.fileName && /\.(pdf|docx?|txt|rtf)$/i.test(r.fileName))
+  );
+  const imageResources = resources.filter(
+    (r) => r.type === "image" || (r.fileName && /\.(png|jpe?g|webp|gif|svg)$/i.test(r.fileName))
+  );
   const scriptResources = resources.filter((r) => r.type === "script");
 
   const handleSearchCode = (e: React.FormEvent) => {
@@ -708,49 +860,87 @@ function AudiencePortalContent() {
             <div className="flex items-center gap-2 border-b border-slate-800 pb-2 overflow-x-auto">
               <button
                 type="button"
+                onClick={() => setActiveTab("all")}
+                className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition shrink-0 ${
+                  activeTab === "all"
+                    ? "bg-blue-600 text-white shadow-sm"
+                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/40"
+                }`}
+              >
+                All Resources ({resources.length})
+              </button>
+
+              <button
+                type="button"
                 onClick={() => setActiveTab("videos")}
-                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition ${
+                className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition shrink-0 ${
                   activeTab === "videos"
                     ? "bg-rose-500/20 text-rose-300 border border-rose-500/40 shadow-sm"
                     : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/40"
                 }`}
               >
                 <Video className="w-4 h-4" />
-                Video Recordings ({videoResources.length})
+                Videos ({videoResources.length})
               </button>
 
               <button
                 type="button"
                 onClick={() => setActiveTab("slides")}
-                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition ${
+                className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition shrink-0 ${
                   activeTab === "slides"
                     ? "bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm"
                     : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/40"
                 }`}
               >
                 <Presentation className="w-4 h-4" />
-                PPT Slides ({pptResources.length})
+                Slides ({pptResources.length})
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab("docs")}
+                className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition shrink-0 ${
+                  activeTab === "docs"
+                    ? "bg-sky-500/20 text-sky-300 border border-sky-500/40 shadow-sm"
+                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/40"
+                }`}
+              >
+                <FileText className="w-4 h-4" />
+                Docs & PDFs ({docResources.length})
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab("photos")}
+                className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition shrink-0 ${
+                  activeTab === "photos"
+                    ? "bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-sm"
+                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/40"
+                }`}
+              >
+                <ImageIcon className="w-4 h-4" />
+                Photos ({imageResources.length})
               </button>
 
               <button
                 type="button"
                 onClick={() => setActiveTab("scripts")}
-                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition ${
+                className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition shrink-0 ${
                   activeTab === "scripts"
                     ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm"
                     : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/40"
                 }`}
               >
                 <FileCode className="w-4 h-4" />
-                Scripts & Notes ({scriptResources.length})
+                Scripts ({scriptResources.length})
               </button>
 
               <button
                 type="button"
                 onClick={() => setActiveTab("schedule")}
-                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition ${
+                className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold transition shrink-0 ${
                   activeTab === "schedule"
-                    ? "bg-blue-500/20 text-blue-300 border border-blue-500/40 shadow-sm"
+                    ? "bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 shadow-sm"
                     : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/40"
                 }`}
               >
@@ -758,6 +948,37 @@ function AudiencePortalContent() {
                 Schedule ({eventSessions.length})
               </button>
             </div>
+
+            {/* Tab 0: All Resources */}
+            {activeTab === "all" && (
+              <div className="space-y-6">
+                {resources.length === 0 ? (
+                  <div className="p-12 text-center rounded-2xl bg-slate-900/40 border border-slate-800">
+                    <FileText className="w-10 h-10 text-slate-600 mx-auto mb-3" />
+                    <h3 className="text-sm font-semibold text-slate-300">No resources published yet</h3>
+                    <p className="text-xs text-slate-500 mt-1">
+                      The event organizers will upload videos, slides, photos, and materials here soon.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {resources.map((res) => {
+                      const eventCode = currentEvent.accessCode || "";
+                      if (res.type === "video" || res.fileMimeType?.startsWith("video/")) {
+                        return <AudienceVideoItem key={res.id} resource={res} eventCode={eventCode} />;
+                      }
+                      if (res.type === "ppt" || (res.fileName && /\.(ppt|pptx|odp|key)$/i.test(res.fileName))) {
+                        return <AudienceSlideItem key={res.id} resource={res} eventCode={eventCode} />;
+                      }
+                      if (res.type === "image" || res.fileMimeType?.startsWith("image/")) {
+                        return <AudienceImageItem key={res.id} resource={res} eventCode={eventCode} />;
+                      }
+                      return <AudienceDocumentItem key={res.id} resource={res} eventCode={eventCode} />;
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Tab 1: Video Recordings */}
             {activeTab === "videos" && (
@@ -773,7 +994,7 @@ function AudiencePortalContent() {
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {videoResources.map((vid) => (
-                      <AudienceVideoItem key={vid.id} resource={vid} />
+                      <AudienceVideoItem key={vid.id} resource={vid} eventCode={currentEvent.accessCode || ""} />
                     ))}
                   </div>
                 )}
@@ -794,7 +1015,49 @@ function AudiencePortalContent() {
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                     {pptResources.map((slide) => (
-                      <AudienceSlideItem key={slide.id} resource={slide} />
+                      <AudienceSlideItem key={slide.id} resource={slide} eventCode={currentEvent.accessCode || ""} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Tab 2B: Documents & PDFs */}
+            {activeTab === "docs" && (
+              <div className="space-y-6">
+                {docResources.length === 0 ? (
+                  <div className="p-12 text-center rounded-2xl bg-slate-900/40 border border-slate-800">
+                    <FileText className="w-10 h-10 text-slate-600 mx-auto mb-3" />
+                    <h3 className="text-sm font-semibold text-slate-300">No documents or PDFs uploaded yet</h3>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Official brochures, PDFs, and handouts will appear here.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    {docResources.map((docItem) => (
+                      <AudienceDocumentItem key={docItem.id} resource={docItem} eventCode={currentEvent.accessCode || ""} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Tab 2C: Photos & Images */}
+            {activeTab === "photos" && (
+              <div className="space-y-6">
+                {imageResources.length === 0 ? (
+                  <div className="p-12 text-center rounded-2xl bg-slate-900/40 border border-slate-800">
+                    <ImageIcon className="w-10 h-10 text-slate-600 mx-auto mb-3" />
+                    <h3 className="text-sm font-semibold text-slate-300">No photos uploaded yet</h3>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Stage photos, badges, and event galleries will be published here.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-5">
+                    {imageResources.map((img) => (
+                      <AudienceImageItem key={img.id} resource={img} eventCode={currentEvent.accessCode || ""} />
                     ))}
                   </div>
                 )}

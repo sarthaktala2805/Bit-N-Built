@@ -134,7 +134,9 @@ export function buildPublicEventDocument(
     fileName: r.fileName,
     fileSize: r.fileSize,
     fileMimeType: r.fileMimeType,
+    storagePath: r.storagePath || null,
   }));
+
 
   return {
     eventCode: codeKey,
